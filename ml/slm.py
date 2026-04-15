@@ -20,7 +20,7 @@ NUM_PREDICT = 20
 TOP_P = 0.9
 RESULTS_DIR = "results"
 
-MODELS = [
+DEFAULT_MODELS = [
     {"name": "llama3.1:latest", "provider": "ollama", "model": "llama3.1:latest"},
     {"name": "ministral-3:8b", "provider": "ollama", "model": "ministral-3:8b"},
     {"name": "granite4:tiny-h", "provider": "ollama", "model": "granite4:tiny-h"},
@@ -32,10 +32,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--temp-mode", choices=["fixed", "random", "decreasing"], default="random")
     parser.add_argument("--temperature", type=float, default=0.3, help="Temperature value for fixed mode")
+    parser.add_argument("--model", type=str, default=None, help="Ollama model name to run (overrides defaults)")
+    parser.add_argument("--provider", type=str, default="ollama", help="Provider for --model")
     args = parser.parse_args()
 
+    models = (
+        [{"name": args.model, "provider": args.provider, "model": args.model}]
+        if args.model
+        else DEFAULT_MODELS
+    )
+
     bandit = BanditLLM(
-        models=MODELS,
+        models=models,
         system_prompt=SYSTEM_PROMPT_PLAIN,
         prompt_builder=build_prompt_plain,
         item_title_fn=get_movie_title,
