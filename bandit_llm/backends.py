@@ -42,6 +42,7 @@ def get_ollama_response(
             "num_predict": num_predict,
             "top_p": top_p,
         },
+        "think": False,
     }
     if response_schema is not None:
         kwargs["format"] = response_schema.model_json_schema()
