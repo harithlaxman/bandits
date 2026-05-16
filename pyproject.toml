@@ -12,6 +12,7 @@ dependencies = [
     "ollama>=0.6.1",
     "openai>=2.31.0",
     "pandas>=3.0.2",
+    "pandas-stubs>=3.0.0.260204",
     "requests>=2.33.1",
     "scikit-learn>=1.8.0",
     "sentence-transformers>=5.4.1",
