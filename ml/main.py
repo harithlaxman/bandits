@@ -23,6 +23,7 @@ REQUIRED_CFG_KEYS = {
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
+VALID_RUNNERS = {"ollama", "random"}
 
 
 def parse_args():
@@ -38,8 +39,10 @@ def load_config(path: Path) -> dict:
     missing = REQUIRED_CFG_KEYS - cfg.keys()
     if missing:
         raise ValueError(f"config {path} missing keys: {sorted(missing)}")
-    if cfg["runner"] not in {"ollama"}:
-        raise ValueError(f"unknown runner: {cfg['runner']}")
+    if cfg["runner"] not in VALID_RUNNERS:
+        raise ValueError(
+            f"unknown runner: {cfg['runner']!r} (valid: {sorted(VALID_RUNNERS)})"
+        )
     cfg["output"] = Path(cfg["output"])
     cfg["config_name"] = path.stem
     return cfg
@@ -132,10 +135,19 @@ def make_get_response(runner: str, model: str, temperature: float):
     if runner == "ollama":
         from ollama_runner import generate
 
-        def _call(prompt: str) -> str:
+        def _ollama_call(prompt: str) -> str:
             return generate(model, prompt, temperature=temperature)
 
-        return _call
+        return _ollama_call
+
+    if runner == "random":
+        sys_rng = random.SystemRandom()
+
+        def _random_call(_prompt: str) -> str:
+            return f"CHOICE: {sys_rng.randint(1, N_CHOICES)}"
+
+        return _random_call
+
     raise ValueError(f"unknown runner: {runner}")
 
 
