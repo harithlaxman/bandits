@@ -1,6 +1,7 @@
 import argparse
 import ast
 import json
+import os
 import random
 import re
 import time
@@ -24,12 +25,19 @@ REQUIRED_CFG_KEYS = {
     "num_steps", "seed", "temperature", "output",
 }
 VALID_RUNNERS = {"ollama", "vllm", "openai", "random"}
+RESUME_MATCH_KEYS = (
+    "model", "runner", "num_epochs", "num_users",
+    "num_steps", "seed", "temperature",
+)
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, required=True,
                    help="path to a JSON config file (see configs/)")
+    p.add_argument("--resume", type=Path, default=None,
+                   help="path to an existing run dir to resume "
+                        "(must contain config.json + epochs.jsonl)")
     return p.parse_args()
 
 
@@ -198,12 +206,64 @@ def main():
     random.seed(seed)
     get_response = make_get_response(runner, model, temperature)
 
-    epochs_out: list[dict] = []
+    config_record = {
+        "config_name": config_name,
+        "model": model,
+        "runner": runner,
+        "num_epochs": num_epochs,
+        "num_users": num_users,
+        "num_steps": num_steps,
+        "seed": seed,
+        "temperature": temperature,
+        "output": str(output),
+        "max_parse_retries": MAX_PARSE_RETRIES,
+    }
+
+    if args.resume is not None:
+        out_dir = args.resume
+        cfg_path = out_dir / "config.json"
+        epochs_path = out_dir / "epochs.jsonl"
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"--resume dir missing config.json: {out_dir}")
+        with open(cfg_path) as f:
+            prior = json.load(f)
+        mismatched = {
+            k: (prior.get(k), config_record[k])
+            for k in RESUME_MATCH_KEYS
+            if prior.get(k) != config_record[k]
+        }
+        if mismatched:
+            raise ValueError(
+                f"--resume config mismatch on {sorted(mismatched)}: "
+                f"prior vs new = {mismatched}"
+            )
+        n_completed = 0
+        if epochs_path.exists():
+            with open(epochs_path) as f:
+                n_completed = sum(1 for line in f if line.strip())
+        print(f"resuming {out_dir}: {n_completed} epoch(s) already completed")
+    else:
+        model_slug = model.replace(":", "_").replace("/", "_")
+        timestamp = datetime.now().strftime("%m%d_%H%M")
+        out_dir = output / f"{config_name}_{model_slug}_{timestamp}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        config_record["timestamp"] = timestamp
+        with open(out_dir / "config.json", "w") as f:
+            json.dump(config_record, f, indent=2)
+        epochs_path = out_dir / "epochs.jsonl"
+        n_completed = 0
+
+    total_users = 0
+    total_steps = 0
 
     for epoch in range(num_epochs):
         cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users)
         impression_ids = imprs_df.index.to_list()
         random.shuffle(impression_ids)
+
+        if epoch < n_completed:
+            tqdm.write(f"resume: skipping completed epoch {epoch}")
+            continue
 
         user_logs: dict[int, dict] = {}
         steps_run = 0
@@ -259,39 +319,23 @@ def main():
                 f"choice_idx={idx} reward={reward}"
             )
 
-        epochs_out.append({
+        epoch_record = {
             "epoch": epoch,
             "steps_run": steps_run,
             "user_logs": {str(k): v for k, v in user_logs.items()},
-        })
+        }
+        with open(epochs_path, "a") as f:
+            f.write(json.dumps(epoch_record) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
-    model_slug = model.replace(":", "_").replace("/", "_")
-    timestamp = datetime.now().strftime("%m%d_%H%M")
-    out_dir = output / f"{config_name}_{model_slug}_{timestamp}"
-    out_dir.mkdir(parents=True, exist_ok=True)
+        total_users += len(epoch_record["user_logs"])
+        total_steps += steps_run
 
-    config_record = {
-        "config_name": config_name,
-        "model": model,
-        "runner": runner,
-        "num_epochs": num_epochs,
-        "num_users": num_users,
-        "num_steps": num_steps,
-        "seed": seed,
-        "temperature": temperature,
-        "output": str(output),
-        "max_parse_retries": MAX_PARSE_RETRIES,
-        "timestamp": timestamp,
-    }
-    payload = {"config": config_record, "epochs": epochs_out}
-    with open(out_dir / "user_logs.json", "w") as f:
-        json.dump(payload, f, indent=2)
-
-    total_users = sum(len(e["user_logs"]) for e in epochs_out)
-    total_steps = sum(e["steps_run"] for e in epochs_out)
     print(
-        f"Wrote {num_epochs} epoch(s), {total_steps} total steps, "
-        f"{total_users} total user-runs -> {out_dir}"
+        f"Wrote {num_epochs - n_completed} new epoch(s) "
+        f"({num_epochs} total), {total_steps} new steps, "
+        f"{total_users} new user-runs -> {out_dir}"
     )
 
 
