@@ -1,21 +1,15 @@
 [project]
-name = "rl"
+name = "bandits"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "accelerate>=1.13.0",
-    "ipywidgets>=8.1.8",
-    "matplotlib>=3.10.8",
-    "mteb>=2.12.30",
-    "ollama>=0.6.1",
-    "openai>=2.31.0",
-    "pandas>=3.0.2",
-    "pandas-stubs>=3.0.0.260204",
-    "requests>=2.33.1",
-    "scikit-learn>=1.8.0",
-    "sentence-transformers>=5.4.1",
-    "torch>=2.11.0",
-    "transformers>=5.5.4",
+    "azureopenai>=0.0.1",
+    "numpy>=2.4.6",
+    "ollama>=0.6.2",
+    "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
+    "tqdm>=4.67.3",
+    "vllm>=0.21.0",
 ]

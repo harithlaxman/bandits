@@ -1,0 +1,10 @@
+{
+  "model": "google/gemma-4-E4B-it",
+  "runner": "vllm",
+  "num_epochs": 1,
+  "num_users": 1,
+  "num_steps": 1,
+  "seed": 42,
+  "temperature": 0.0,
+  "output": "./data/outputs"
+}

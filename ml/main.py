@@ -23,7 +23,7 @@ REQUIRED_CFG_KEYS = {
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
-VALID_RUNNERS = {"ollama", "random"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "random"}
 
 
 def parse_args():
@@ -139,6 +139,22 @@ def make_get_response(runner: str, model: str, temperature: float):
             return generate(model, prompt, temperature=temperature)
 
         return _ollama_call
+
+    if runner == "vllm":
+        from vllm_runner import generate as vllm_generate
+
+        def _vllm_call(prompt: str) -> str:
+            return vllm_generate(model, prompt, temperature=temperature)
+
+        return _vllm_call
+
+    if runner == "openai":
+        from openai_runner import generate as openai_generate
+
+        def _openai_call(prompt: str) -> str:
+            return openai_generate(model, prompt, temperature=temperature)
+
+        return _openai_call
 
     if runner == "random":
         sys_rng = random.SystemRandom()
