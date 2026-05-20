@@ -1,6 +1,6 @@
 from ollama import Client
 
-_client = Client()
+_client = Client(timeout=120)
 
 
 def generate(

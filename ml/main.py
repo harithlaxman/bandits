@@ -9,11 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
+import httpx
 import pandas as pd
 from tqdm import tqdm
 
 DATA_DIR = Path("./data/")
-IMPR_PICKLE = DATA_DIR / "impressions_stationary.pkl"
 METADATA_CSV = DATA_DIR / "metadata.csv"
 
 MAX_PARSE_RETRIES = 3
@@ -38,6 +38,10 @@ def parse_args():
     p.add_argument("--resume", type=Path, default=None,
                    help="path to an existing run dir to resume "
                         "(must contain config.json + epochs.jsonl)")
+    p.add_argument("--mode", choices=["stationary", "nonstationary"],
+                   default="stationary",
+                   help="which impressions pkl to use; nonstationary preserves "
+                        "per-user pre->post order so the regime change is observable")
     return p.parse_args()
 
 
@@ -56,8 +60,8 @@ def load_config(path: Path) -> dict:
     return cfg
 
 
-def get_dataset(num_users: int):
-    df = pd.read_pickle(IMPR_PICKLE)
+def get_dataset(num_users: int, mode: str = "stationary"):
+    df = pd.read_pickle(DATA_DIR / f"impressions_{mode}.pkl")
     users = df["userId"].unique().tolist()
     sampled_users = random.sample(users, num_users)
     impr_df = df[df["userId"].isin(sampled_users)]
@@ -182,7 +186,13 @@ def get_choice(
     last_resp = ""
     for _ in range(MAX_PARSE_RETRIES):
         t0 = time.perf_counter()
-        last_resp = get_response(prompt)
+        try:
+            last_resp = get_response(prompt)
+        except httpx.TimeoutException as e:
+            total_ms += (time.perf_counter() - t0) * 1000
+            last_resp = f"<timeout: {e}>"
+            tqdm.write(last_resp)
+            continue
         total_ms += (time.perf_counter() - t0) * 1000
         idx = parse_choice(last_resp)
         if idx is not None:
@@ -257,9 +267,10 @@ def main():
     total_steps = 0
 
     for epoch in range(num_epochs):
-        cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users)
+        cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users, args.mode)
         impression_ids = imprs_df.index.to_list()
-        random.shuffle(impression_ids)
+        if args.mode != "nonstationary":
+            random.shuffle(impression_ids)
 
         if epoch < n_completed:
             tqdm.write(f"resume: skipping completed epoch {epoch}")

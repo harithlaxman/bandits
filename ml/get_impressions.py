@@ -206,5 +206,54 @@ def build_stationary(n_main: int = 60, output: str = "impressions_stationary.pkl
     )
 
 
+def build_nonstationary(
+    input_pkl: str = "impressions_stationary.pkl",
+    output: str = "impressions_nonstationary.pkl",
+    n_pre: int | None = None,
+):
+    df = pd.read_pickle(OUTPUT_DATA_DIR / input_pkl)
+    df = df.sort_values(["userId", "impression_id"]).reset_index(drop=True)
+
+    new_rows = []
+    for _, g in df.groupby("userId", sort=False):
+        cold = g[g["phase"] == "cold_start"]
+        normal = g[g["phase"] == "normal"]
+        split = n_pre if n_pre is not None else len(normal) // 2
+
+        for _, r in cold.iterrows():
+            new_rows.append({**r.to_dict(), "regime": None})
+
+        for i, (_, r) in enumerate(normal.iterrows()):
+            if i < split:
+                new_rows.append({**r.to_dict(), "regime": "pre"})
+            else:
+                flipped = [-x for x in r["labels"]]
+                new_rows.append({**r.to_dict(), "labels": flipped, "regime": "post"})
+
+    out = pd.DataFrame(new_rows)
+    out["impression_id"] = range(len(out))
+    out.to_pickle(OUTPUT_DATA_DIR / output)
+    n_users = out["userId"].nunique()
+    print(
+        f"Non-stationary: {n_users} users, {len(out)} rows -> {OUTPUT_DATA_DIR / output}"
+    )
+
+
 if __name__ == "__main__":
-    build_stationary()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "mode", nargs="?", default="stationary",
+        choices=["stationary", "nonstationary"],
+    )
+    ap.add_argument(
+        "--n-pre", type=int, default=None,
+        help="(nonstationary only) impressions before flip; default = half per user",
+    )
+    args = ap.parse_args()
+
+    if args.mode == "stationary":
+        build_stationary()
+    else:
+        build_nonstationary(n_pre=args.n_pre)
