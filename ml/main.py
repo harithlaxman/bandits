@@ -42,6 +42,8 @@ def parse_args():
                    default="stationary",
                    help="which impressions pkl to use; nonstationary preserves "
                         "per-user pre->post order so the regime change is observable")
+    p.add_argument("--positive-only", action="store_true",
+                   help="only include past recommendations the user LIKED in history prompt")
     return p.parse_args()
 
 
@@ -110,10 +112,14 @@ def get_coldstart_prompt(mids: List[int], labels: List[int], mid_to_data) -> str
     return prompt
 
 
-def get_history_prompt(interactions: list[dict], mid_to_data) -> str:
+def get_history_prompt(
+    interactions: list[dict], mid_to_data, positive_only: bool
+) -> str:
     prompt = "YOUR PAST RECOMMENDATIONS:\n"
     for it in interactions:
         if it["chosen_mid"] is None:
+            continue
+        if positive_only and it["reward"] != 1:
             continue
         prompt += "You recommended:\n"
         prompt += mid_to_data[it["chosen_mid"]]
@@ -212,6 +218,7 @@ def main():
     temperature = cfg["temperature"]
     output      = cfg["output"]
     config_name = cfg["config_name"]
+    positive_only = args.positive_only
 
     random.seed(seed)
     get_response = make_get_response(runner, model, temperature)
@@ -227,6 +234,7 @@ def main():
         "temperature": temperature,
         "output": str(output),
         "max_parse_retries": MAX_PARSE_RETRIES,
+        "positive_only": positive_only,
     }
 
     if args.resume is not None:
@@ -303,7 +311,7 @@ def main():
 
             prompt = (
                 user_logs[uid]["cold_start_prompt"]
-                + get_history_prompt(user_logs[uid]["interactions"], mid_to_data)
+                + get_history_prompt(user_logs[uid]["interactions"], mid_to_data, positive_only)
                 + get_candidates_prompt(cands, mid_to_data)
             )
 
