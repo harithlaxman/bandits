@@ -297,6 +297,10 @@ def main():
             cands = [int(m) for m in row["impression"]]
             labels = [int(r) for r in row["labels"]]
 
+            user_step = len(user_logs[uid]["interactions"]) if uid in user_logs else 0
+            if user_step >= 30:
+                labels = labels[1:] + labels[:1]
+
             if uid not in user_logs:
                 cs = cold_starts_df.loc[uid]
                 cs_mids = [int(m) for m in cs.impression]

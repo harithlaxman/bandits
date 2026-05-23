@@ -40,8 +40,9 @@ def parse_args():
                         "(must contain config.json + epochs.jsonl)")
     p.add_argument("--mode", choices=["stationary", "nonstationary"],
                    default="stationary",
-                   help="which impressions pkl to use; nonstationary preserves "
-                        "per-user pre->post order so the regime change is observable")
+                   help="nonstationary: left-rotate the labels array by one after "
+                        "each user's 30th interaction (reward mapping shifts; "
+                        "candidate movies unchanged)")
     p.add_argument("--positive-only", action="store_true",
                    help="only include past recommendations the user LIKED in history prompt")
     return p.parse_args()
@@ -62,8 +63,8 @@ def load_config(path: Path) -> dict:
     return cfg
 
 
-def get_dataset(num_users: int, mode: str = "stationary"):
-    df = pd.read_pickle(DATA_DIR / f"impressions_{mode}.pkl")
+def get_dataset(num_users: int):
+    df = pd.read_pickle(DATA_DIR / "impressions_stationary.pkl")
     users = df["userId"].unique().tolist()
     sampled_users = random.sample(users, num_users)
     impr_df = df[df["userId"].isin(sampled_users)]
@@ -275,10 +276,9 @@ def main():
     total_steps = 0
 
     for epoch in range(num_epochs):
-        cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users, args.mode)
+        cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users)
         impression_ids = imprs_df.index.to_list()
-        if args.mode != "nonstationary":
-            random.shuffle(impression_ids)
+        random.shuffle(impression_ids)
 
         if epoch < n_completed:
             tqdm.write(f"resume: skipping completed epoch {epoch}")
@@ -297,6 +297,10 @@ def main():
             uid = int(row["userId"])
             cands = [int(m) for m in row["impression"]]
             labels = [int(r) for r in row["labels"]]
+
+            user_step = len(user_logs[uid]["interactions"]) if uid in user_logs else 0
+            if args.mode == "nonstationary" and user_step >= 30:
+                labels = labels[1:] + labels[:1]
 
             if uid not in user_logs:
                 cs = cold_starts_df.loc[uid]
