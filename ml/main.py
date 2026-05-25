@@ -24,7 +24,7 @@ REQUIRED_CFG_KEYS = {
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
-VALID_RUNNERS = {"ollama", "vllm", "openai", "random"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "random", "huggingface"}
 RESUME_MATCH_KEYS = (
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature",
@@ -166,6 +166,14 @@ def make_get_response(runner: str, model: str, temperature: float):
             return vllm_generate(model, prompt, temperature=temperature)
 
         return _vllm_call
+
+    if runner == "huggingface":
+        from huggingface_runner import generate as hf_generate
+
+        def _hf_call(prompt: str) -> str:
+            return hf_generate(model, prompt, temperature=temperature)
+
+        return _hf_call
 
     if runner == "openai":
         from openai_runner import generate as openai_generate

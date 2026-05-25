@@ -1,0 +1,10 @@
+{
+  "model": "ibm-granite/granite-4.1-3b",
+  "runner": "huggingface",
+  "num_epochs": 1,
+  "num_users": 1,
+  "num_steps": 15,
+  "seed": 42,
+  "temperature": 0.0,
+  "output": "./data/outputs"
+}
