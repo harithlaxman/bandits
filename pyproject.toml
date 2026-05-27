@@ -12,6 +12,7 @@ dependencies = [
     "ollama>=0.6.2",
     "pandas>=3.0.3",
     "pyarrow>=24.0.0",
+    "sentence-transformers>=5.5.1",
     "torch>=2.11.0",
     "tqdm>=4.67.3",
     "transformers>=5.8.1",
