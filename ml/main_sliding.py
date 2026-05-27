@@ -5,6 +5,7 @@ import os
 import random
 import re
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -342,8 +343,9 @@ def main():
 
     for epoch in range(num_epochs):
         cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users)
-        impression_ids = imprs_df.index.to_list()
-        random.shuffle(impression_ids)
+        user_queues: dict[int, deque] = {}
+        for impr_id, uid in imprs_df["userId"].items():
+            user_queues.setdefault(int(uid), deque()).append(int(impr_id))
 
         if epoch < n_completed:
             tqdm.write(f"resume: skipping completed epoch {epoch}")
@@ -353,18 +355,18 @@ def main():
         steps_run = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
-            if step >= len(impression_ids):
+            active_users = [u for u, q in user_queues.items() if q]
+            if not active_users:
                 tqdm.write("No more impressions in dataset")
                 break
 
-            impr_id = impression_ids[step]
+            uid = random.choice(active_users)
+            impr_id = user_queues[uid].popleft()
             row = imprs_df.loc[impr_id]
-            uid = int(row["userId"])
             cands = [int(m) for m in row["impression"]]
             labels = [int(r) for r in row["labels"]]
 
-            user_step = len(user_logs[uid]["interactions"]) if uid in user_logs else 0
-            if args.mode == "nonstationary" and user_step >= 30:
+            if args.mode == "nonstationary" and step >= num_steps // 2:
                 labels = labels[1:] + labels[:1]
 
             if uid not in user_logs:

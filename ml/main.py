@@ -5,6 +5,7 @@ import os
 import random
 import re
 import time
+from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -18,6 +19,19 @@ METADATA_CSV = DATA_DIR / "metadata.csv"
 
 MAX_PARSE_RETRIES = 3
 N_CHOICES = 5
+TOP_K_AGGREGATE = 3
+
+BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandit. \
+Each round you are shown a user's taste profile and a set of candidate movies, and \
+you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
+it. Your objective is to MAXIMIZE the total number of liked recommendations over \
+all rounds. To do this, balance two competing pressures:
+- EXPLOITATION: recommend movies you are confident this user will like.
+- EXPLORATION: sometimes recommend movies whose appeal is uncertain, to learn \
+tastes you cannot yet predict — this pays off most when you know little about the \
+user.
+
+"""
 
 
 REQUIRED_CFG_KEYS = {
@@ -139,6 +153,25 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
         'Reply with ONLY the number of your choice in this exact format: '
         '"CHOICE: <number>". No other text.\n'
     )
+    return prompt
+
+
+def get_aggregate_prompt(
+    liked_counts, disliked_counts, mid_to_data, top_k=TOP_K_AGGREGATE
+) -> str:
+    if not liked_counts and not disliked_counts:
+        return ""
+    prompt = "ACROSS ALL USERS SO FAR:\n"
+    top_liked = [mid for mid, _ in liked_counts.most_common(top_k)]
+    top_disliked = [mid for mid, _ in disliked_counts.most_common(top_k)]
+    if top_liked:
+        prompt += "Users tend to LIKE these movies:\n"
+        for mid in top_liked:
+            prompt += mid_to_data[mid] + "\n"
+    if top_disliked:
+        prompt += "Users tend to DISLIKE these movies:\n"
+        for mid in top_disliked:
+            prompt += mid_to_data[mid] + "\n"
     return prompt
 
 
@@ -285,29 +318,32 @@ def main():
 
     for epoch in range(num_epochs):
         cold_starts_df, imprs_df, mid_to_data = get_dataset(num_users)
-        impression_ids = imprs_df.index.to_list()
-        random.shuffle(impression_ids)
+        user_queues: dict[int, deque] = {}
+        for impr_id, uid in imprs_df["userId"].items():
+            user_queues.setdefault(int(uid), deque()).append(int(impr_id))
 
         if epoch < n_completed:
             tqdm.write(f"resume: skipping completed epoch {epoch}")
             continue
 
         user_logs: dict[int, dict] = {}
+        liked_counts: Counter = Counter()
+        disliked_counts: Counter = Counter()
         steps_run = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
-            if step >= len(impression_ids):
+            active_users = [u for u, q in user_queues.items() if q]
+            if not active_users:
                 tqdm.write("No more impressions in dataset")
                 break
 
-            impr_id = impression_ids[step]
+            uid = random.choice(active_users)
+            impr_id = user_queues[uid].popleft()
             row = imprs_df.loc[impr_id]
-            uid = int(row["userId"])
             cands = [int(m) for m in row["impression"]]
             labels = [int(r) for r in row["labels"]]
 
-            user_step = len(user_logs[uid]["interactions"]) if uid in user_logs else 0
-            if args.mode == "nonstationary" and user_step >= 30:
+            if args.mode == "nonstationary" and step >= num_steps // 2:
                 labels = labels[1:] + labels[:1]
 
             if uid not in user_logs:
@@ -322,7 +358,9 @@ def main():
                 }
 
             prompt = (
-                user_logs[uid]["cold_start_prompt"]
+                BANDIT_PREAMBLE
+                + get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
+                + user_logs[uid]["cold_start_prompt"]
                 + get_history_prompt(user_logs[uid]["interactions"], mid_to_data, positive_only)
                 + get_candidates_prompt(cands, mid_to_data)
             )
@@ -344,6 +382,11 @@ def main():
                 "latency_ms": ms,
             })
             steps_run = step + 1
+
+            if reward == 1:
+                liked_counts[chosen_mid] += 1
+            elif reward == -1:
+                disliked_counts[chosen_mid] += 1
 
             tqdm.write(
                 f"step={step} runner={runner} model={model} "

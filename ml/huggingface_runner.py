@@ -1,4 +1,4 @@
-from transformers import pipeline
+from transformers import GenerationConfig, pipeline
 
 _pipes = {}
 
@@ -26,11 +26,14 @@ def generate(
     messages.append({"role": "user", "content": prompt})
 
     do_sample = temperature > 0.0
-    out = pipe(
-        messages,
+    gen_config = GenerationConfig(
         max_new_tokens=512,
         do_sample=do_sample,
         temperature=temperature if do_sample else None,
+    )
+    out = pipe(
+        messages,
+        generation_config=gen_config,
         return_full_text=False,
     )
     return out[0]["generated_text"]

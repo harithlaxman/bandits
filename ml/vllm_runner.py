@@ -1,5 +1,13 @@
 from vllm import LLM, SamplingParams
 
+_llms = {}
+
+
+def _get_llm(model: str):
+    if model not in _llms:
+        _llms[model] = LLM(model=model, dtype="bfloat16")
+    return _llms[model]
+
 
 def generate(
     model: str,
@@ -8,7 +16,7 @@ def generate(
     system: str | None = None,
     temperature: float = 0.0,
 ) -> str:
-    llm = LLM(model=model, dtype="bfloat16")
+    llm = _get_llm(model)
 
     sampling_params = SamplingParams(
         temperature=temperature,

@@ -5,7 +5,7 @@ epochs.jsonl shape as main_sliding.py, so viz/plot_ctr.py / viz/plot_cum_regret.
 viz/plot_regime_ctr.py consume its runs unchanged.
 
 It reuses main_sliding.get_dataset, so with a matching `seed` it sees the exact
-same sampled users / shuffled impressions as a matching LLM run. Each user gets
+same sampled users / impression order as a matching LLM run. Each user gets
 its own model, warm-started from that user's 5 cold-start ratings; only the chosen
 arm's reward is revealed and folded back (true bandit feedback, not full labels).
 
@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import random
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -156,8 +157,9 @@ def main():
 
     for epoch in range(num_epochs):
         cold_starts_df, imprs_df, _ = get_dataset(num_users)
-        impression_ids = imprs_df.index.to_list()
-        random.shuffle(impression_ids)
+        user_queues: dict[int, deque] = {}
+        for impr_id, uid in imprs_df["userId"].items():
+            user_queues.setdefault(int(uid), deque()).append(int(impr_id))
 
         if epoch < n_completed:
             tqdm.write(f"resume: skipping completed epoch {epoch}")
@@ -170,18 +172,18 @@ def main():
         epoch_clicks = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
-            if step >= len(impression_ids):
+            active_users = [u for u, q in user_queues.items() if q]
+            if not active_users:
                 tqdm.write("No more impressions in dataset")
                 break
 
-            impr_id = impression_ids[step]
+            uid = random.choice(active_users)
+            impr_id = user_queues[uid].popleft()
             row = imprs_df.loc[impr_id]
-            uid = int(row["userId"])
             cands = [int(m) for m in row["impression"]]
             labels = [int(r) for r in row["labels"]]
 
-            user_step = len(user_logs[uid]["interactions"]) if uid in user_logs else 0
-            if mode == "nonstationary" and user_step >= 30:
+            if mode == "nonstationary" and step >= num_steps // 2:
                 labels = labels[1:] + labels[:1]
 
             if uid not in user_logs:
