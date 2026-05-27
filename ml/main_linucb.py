@@ -1,8 +1,8 @@
 """Classical contextual-bandit runner (LinUCB / Linear Thompson Sampling).
 
 A non-LLM baseline that learns online from revealed rewards and emits the SAME
-epochs.jsonl shape as main_sliding.py, so plot_ctr.py / plot_cum_regret.py /
-plot_regime_ctr.py consume its runs unchanged.
+epochs.jsonl shape as main_sliding.py, so viz/plot_ctr.py / viz/plot_cum_regret.py /
+viz/plot_regime_ctr.py consume its runs unchanged.
 
 It reuses main_sliding.get_dataset, so with a matching `seed` it sees the exact
 same sampled users / shuffled impressions as a matching LLM run. Each user gets
