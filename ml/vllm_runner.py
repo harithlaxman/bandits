@@ -23,8 +23,10 @@ def generate(
         max_tokens=512,
     )
 
-    # Build a single text prompt, prepending the system message if provided
-    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
 
-    outputs = llm.generate([full_prompt], sampling_params)
+    outputs = llm.chat(messages, sampling_params)
     return outputs[0].outputs[0].text
