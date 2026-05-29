@@ -25,10 +25,10 @@ BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandi
 Each round you are shown a user's taste profile and a set of candidate movies, and \
 you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
 it. Your objective is to MAXIMIZE the total number of liked recommendations over \
-all rounds. To do this, balance two competing pressures:
+several rounds. To do this, balance two competing pressures:
 - EXPLOITATION: recommend movies you are confident this user will like.
-- EXPLORATION: sometimes recommend movies whose appeal is uncertain, to learn \
-tastes you cannot yet predict — this pays off most when you know little about the \
+- EXPLORATION: recommend movies whose appeal is uncertain, to learn \
+tastes you cannot yet predict. This pays off most when you know little about the \
 user.
 
 """
@@ -145,13 +145,20 @@ def get_history_prompt(
     return prompt
 
 
+def get_score_prompt(interactions: list[dict]) -> str:
+    made = [it for it in interactions if it["chosen_mid"] is not None]
+    if not made:
+        return ""
+    liked = sum(1 for it in made if it["reward"] == 1)
+    return f"SCORE SO FAR: {liked} liked out of {len(made)} recommendations.\n\n"
+
+
 def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     prompt = "CANDIDATES (choose ONE):\n"
     for i, mid in enumerate(mids, 1):
         prompt += f"[{i}]\n{mid_to_data[mid]}\n"
     prompt += (
-        'Reply with ONLY the number of your choice in this exact format: '
-        '"CHOICE: <number>". No other text.\n'
+        'State your choice in this exact format: "CHOICE: <number>".\n'
     )
     return prompt
 
@@ -183,12 +190,15 @@ def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
     return idx if 0 <= idx < n else None
 
 
-def make_get_response(runner: str, model: str, temperature: float):
+def make_get_response(
+    runner: str, model: str, temperature: float, model_type: str,
+    system: str | None = None,
+):
     if runner == "ollama":
         from ollama_runner import generate
 
         def _ollama_call(prompt: str) -> str:
-            return generate(model, prompt, temperature=temperature)
+            return generate(model, prompt, system=system, temperature=temperature)
 
         return _ollama_call
 
@@ -196,7 +206,10 @@ def make_get_response(runner: str, model: str, temperature: float):
         from vllm_runner import generate as vllm_generate
 
         def _vllm_call(prompt: str) -> str:
-            return vllm_generate(model, prompt, temperature=temperature)
+            return vllm_generate(
+                model, prompt, system=system,
+                temperature=temperature, model_type=model_type,
+            )
 
         return _vllm_call
 
@@ -204,7 +217,7 @@ def make_get_response(runner: str, model: str, temperature: float):
         from huggingface_runner import generate as hf_generate
 
         def _hf_call(prompt: str) -> str:
-            return hf_generate(model, prompt, temperature=temperature)
+            return hf_generate(model, prompt, system=system, temperature=temperature)
 
         return _hf_call
 
@@ -212,7 +225,7 @@ def make_get_response(runner: str, model: str, temperature: float):
         from openai_runner import generate as openai_generate
 
         def _openai_call(prompt: str) -> str:
-            return openai_generate(model, prompt, temperature=temperature)
+            return openai_generate(model, prompt, system=system, temperature=temperature)
 
         return _openai_call
 
@@ -260,10 +273,11 @@ def main():
     temperature = cfg["temperature"]
     output      = cfg["output"]
     config_name = cfg["config_name"]
+    model_type  = cfg.get("model_type", "instruct")
     positive_only = args.positive_only
 
     random.seed(seed)
-    get_response = make_get_response(runner, model, temperature)
+    get_response = make_get_response(runner, model, temperature, model_type, BANDIT_PREAMBLE)
 
     config_record = {
         "config_name": config_name,
@@ -358,10 +372,10 @@ def main():
                 }
 
             prompt = (
-                BANDIT_PREAMBLE
-                + get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
+                get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
                 + user_logs[uid]["cold_start_prompt"]
                 + get_history_prompt(user_logs[uid]["interactions"], mid_to_data, positive_only)
+                + get_score_prompt(user_logs[uid]["interactions"])
                 + get_candidates_prompt(cands, mid_to_data)
             )
 

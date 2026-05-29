@@ -2,6 +2,8 @@ from vllm import LLM, SamplingParams
 
 _llms = {}
 
+CHAT_MODEL_TYPES = {"instruct", "chat"}
+
 
 def _get_llm(model: str):
     if model not in _llms:
@@ -15,18 +17,24 @@ def generate(
     *,
     system: str | None = None,
     temperature: float = 0.0,
+    model_type: str = "instruct",
 ) -> str:
     llm = _get_llm(model)
 
     sampling_params = SamplingParams(
         temperature=temperature,
         max_tokens=512,
+        ignore_eos=False,
     )
 
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    if model_type in CHAT_MODEL_TYPES:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        outputs = llm.chat(messages, sampling_params)
+    else:
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        outputs = llm.generate(full_prompt, sampling_params)
 
-    outputs = llm.chat(messages, sampling_params)
     return outputs[0].outputs[0].text
