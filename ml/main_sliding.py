@@ -199,7 +199,7 @@ def select_context_window(
 def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     prompt = "CANDIDATES (choose ONE):\n"
     for i, mid in enumerate(mids, 1):
-        prompt += f"[{i}]\n{mid_to_data[mid]}\n"
+        prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
         'State your choice in this exact format: "CHOICE: <number>".\n'
     )
@@ -207,7 +207,7 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
 
 
 def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
-    m = re.search(r"CHOICE:\s*([1-9])", text)
+    m = re.search(r"CHOICE:\s*\[?\s*([1-9])", text)
     if not m:
         return None
     idx = int(m.group(1)) - 1
