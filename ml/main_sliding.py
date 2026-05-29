@@ -201,7 +201,8 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        'State your choice in this exact format: "CHOICE: <number>".\n'
+        "Respond with ONLY your choice in this exact format and nothing else: "
+        '"CHOICE: <number>". Do not explain your reasoning or add any other text.\n'
     )
     return prompt
 

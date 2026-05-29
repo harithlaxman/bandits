@@ -25,11 +25,14 @@ BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandi
 Each round you are shown a user's taste profile and a set of candidate movies, and \
 you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
 it. Your objective is to MAXIMIZE the total number of liked recommendations over \
-several rounds. To do this, balance two competing pressures:
+several rounds. To do this, internally consider two competing pressures:
 - EXPLOITATION: recommend movies you are confident this user will like.
 - EXPLORATION: recommend movies whose appeal is uncertain, to learn \
 tastes you cannot yet predict. This pays off most when you know little about the \
 user.
+
+Weigh these two strategies internally, but do NOT reason out loud or explain your \
+thinking. Respond with only your final choice.
 
 """
 
@@ -158,7 +161,8 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        'State your choice in this exact format: "CHOICE: <number>".\n'
+        "Respond with ONLY your choice in this exact format and nothing else: "
+        '"CHOICE: <number>". Do not explain your reasoning or add any other text.\n'
     )
     return prompt
 
