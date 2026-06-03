@@ -80,6 +80,35 @@ def load_config(path: Path) -> dict:
     return cfg
 
 
+def build_temperature_schedule(temperature, num_steps: int, mode: str) -> list[float]:
+    """Per-step temperature schedule of length num_steps.
+
+    A numeric `temperature` is constant. The strings "increasing"/"decreasing"
+    ramp linearly between 0.0 and 2.0 over the run; in nonstationary mode the
+    ramp restarts at the midpoint so exploration ramps up again after the regime
+    change.
+    """
+    if isinstance(temperature, (int, float)):
+        return [float(temperature)] * num_steps
+
+    if temperature not in ("increasing", "decreasing"):
+        raise ValueError(
+            f"temperature must be a number or one of "
+            f"['increasing', 'decreasing'], got {temperature!r}"
+        )
+
+    def _ramp(length: int) -> list[float]:
+        if length <= 1:
+            return [0.0] * length
+        ramp = [2.0 * i / (length - 1) for i in range(length)]
+        return ramp if temperature == "increasing" else ramp[::-1]
+
+    if mode == "nonstationary":
+        mid = num_steps // 2
+        return _ramp(mid) + _ramp(num_steps - mid)
+    return _ramp(num_steps)
+
+
 def get_dataset(num_users: int):
     df = pd.read_pickle(DATA_DIR / "impressions_stationary.pkl")
     users = df["userId"].unique().tolist()
@@ -195,13 +224,13 @@ def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
 
 
 def make_get_response(
-    runner: str, model: str, temperature: float, model_type: str,
+    runner: str, model: str, model_type: str,
     system: str | None = None,
 ):
     if runner == "ollama":
         from ollama_runner import generate
 
-        def _ollama_call(prompt: str) -> str:
+        def _ollama_call(prompt: str, temperature: float) -> str:
             return generate(model, prompt, system=system, temperature=temperature)
 
         return _ollama_call
@@ -209,7 +238,7 @@ def make_get_response(
     if runner == "vllm":
         from vllm_runner import generate as vllm_generate
 
-        def _vllm_call(prompt: str) -> str:
+        def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
                 model, prompt, system=system,
                 temperature=temperature, model_type=model_type,
@@ -220,7 +249,7 @@ def make_get_response(
     if runner == "huggingface":
         from huggingface_runner import generate as hf_generate
 
-        def _hf_call(prompt: str) -> str:
+        def _hf_call(prompt: str, temperature: float) -> str:
             return hf_generate(model, prompt, system=system, temperature=temperature)
 
         return _hf_call
@@ -228,7 +257,7 @@ def make_get_response(
     if runner == "openai":
         from openai_runner import generate as openai_generate
 
-        def _openai_call(prompt: str) -> str:
+        def _openai_call(prompt: str, temperature: float) -> str:
             return openai_generate(model, prompt, system=system, temperature=temperature)
 
         return _openai_call
@@ -236,7 +265,7 @@ def make_get_response(
     if runner == "random":
         sys_rng = random.SystemRandom()
 
-        def _random_call(_prompt: str) -> str:
+        def _random_call(_prompt: str, _temperature: float) -> str:
             return f"CHOICE: {sys_rng.randint(1, N_CHOICES)}"
 
         return _random_call
@@ -245,14 +274,14 @@ def make_get_response(
 
 
 def get_choice(
-    get_response, prompt: str
+    get_response, prompt: str, temperature: float
 ) -> tuple[int | None, str, float]:
     total_ms = 0.0
     last_resp = ""
     for _ in range(MAX_PARSE_RETRIES):
         t0 = time.perf_counter()
         try:
-            last_resp = get_response(prompt)
+            last_resp = get_response(prompt, temperature)
         except httpx.TimeoutException as e:
             total_ms += (time.perf_counter() - t0) * 1000
             last_resp = f"<timeout: {e}>"
@@ -281,7 +310,8 @@ def main():
     positive_only = args.positive_only
 
     random.seed(seed)
-    get_response = make_get_response(runner, model, temperature, model_type, BANDIT_PREAMBLE)
+    get_response = make_get_response(runner, model, model_type, BANDIT_PREAMBLE)
+    temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
 
     config_record = {
         "config_name": config_name,
@@ -383,7 +413,8 @@ def main():
                 + get_candidates_prompt(cands, mid_to_data)
             )
 
-            idx, raw, ms = get_choice(get_response, prompt)
+            temp = temp_schedule[step]
+            idx, raw, ms = get_choice(get_response, prompt, temp)
             chosen_mid = cands[idx] if idx is not None else None
             reward = labels[idx] if idx is not None else None
 
@@ -392,6 +423,7 @@ def main():
                 "impression_id": int(impr_id),
                 "candidates": cands,
                 "labels": labels,
+                "temperature": temp,
                 "prompt": prompt,
                 "raw_response": raw,
                 "choice_idx": idx,
