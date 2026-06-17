@@ -5,6 +5,8 @@
   "num_users": 20,
   "num_steps": 1000,
   "seed": 42,
-  "temperature": 0.0,
+  "temperature": 1.5,
+  "top_p": 0.95,
+  "top_k": 20,
   "output": "./data/outputs"
 }
