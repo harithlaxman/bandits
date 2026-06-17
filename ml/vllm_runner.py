@@ -17,12 +17,16 @@ def generate(
     *,
     system: str | None = None,
     temperature: float = 0.0,
+    top_p: float = 1.0,
+    top_k: int = -1,
     model_type: str = "instruct",
 ) -> str:
     llm = _get_llm(model)
 
     sampling_params = SamplingParams(
         temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
         max_tokens=512,
         ignore_eos=False,
     )

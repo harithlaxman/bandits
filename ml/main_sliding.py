@@ -280,8 +280,8 @@ def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
 
 
 def make_get_response(
-    runner: str, model: str, model_type: str,
-    system: str | None = None,
+    runner: str, model: str, temperature: float, model_type: str,
+    system: str | None = None, top_p: float = 1.0, top_k: int = -1,
 ):
     if runner == "ollama":
         from ollama_runner import generate
@@ -297,7 +297,8 @@ def make_get_response(
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
                 model, prompt, system=system,
-                temperature=temperature, model_type=model_type,
+                temperature=temperature, top_p=top_p, top_k=top_k,
+                model_type=model_type,
             )
 
         return _vllm_call
@@ -360,14 +361,18 @@ def main():
     num_steps   = cfg["num_steps"]
     seed        = cfg["seed"]
     temperature = cfg["temperature"]
+    top_p       = cfg.get("top_p", 1.0)
+    top_k       = cfg.get("top_k", -1)
     output      = cfg["output"]
     config_name = cfg["config_name"]
     model_type  = cfg.get("model_type", "instruct")
     positive_only = args.positive_only
 
     random.seed(seed)
-    get_response = make_get_response(runner, model, model_type, BANDIT_PREAMBLE)
-    temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
+    get_response = make_get_response(
+        runner, model, temperature, model_type,
+        top_p=top_p, top_k=top_k,
+    )
 
     config_record = {
         "config_name": config_name,
@@ -378,6 +383,8 @@ def main():
         "num_steps": num_steps,
         "seed": seed,
         "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k,
         "output": str(output),
         "max_parse_retries": MAX_PARSE_RETRIES,
         "max_context": MAX_CONTEXT,
