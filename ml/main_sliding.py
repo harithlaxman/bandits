@@ -5,7 +5,7 @@ import os
 import random
 import re
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -20,6 +20,22 @@ METADATA_CSV = DATA_DIR / "metadata.csv"
 MAX_PARSE_RETRIES = 3
 N_CHOICES = 5
 MAX_CONTEXT = 10
+TOP_K_AGGREGATE = 3
+
+BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandit. \
+Each round you are shown a user's taste profile and a set of candidate movies, and \
+you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
+it. Your objective is to MAXIMIZE the total number of liked recommendations over \
+several rounds. To do this, internally consider two competing pressures:
+- EXPLOITATION: recommend movies you are confident this user will like.
+- EXPLORATION: recommend movies whose appeal is uncertain, to learn \
+tastes you cannot yet predict. This pays off most when you know little about the \
+user.
+
+Weigh these two strategies internally, but do NOT reason out loud or explain your \
+thinking. Respond with only your final choice.
+
+"""
 
 
 REQUIRED_CFG_KEYS = {
@@ -63,6 +79,35 @@ def load_config(path: Path) -> dict:
     cfg["output"] = Path(cfg["output"])
     cfg["config_name"] = path.stem
     return cfg
+
+
+def build_temperature_schedule(temperature, num_steps: int, mode: str) -> list[float]:
+    """Per-step temperature schedule of length num_steps.
+
+    A numeric `temperature` is constant. The strings "increasing"/"decreasing"
+    ramp linearly between 0.0 and 2.0 over the run; in nonstationary mode the
+    ramp restarts at the midpoint so exploration ramps up again after the regime
+    change.
+    """
+    if isinstance(temperature, (int, float)):
+        return [float(temperature)] * num_steps
+
+    if temperature not in ("increasing", "decreasing"):
+        raise ValueError(
+            f"temperature must be a number or one of "
+            f"['increasing', 'decreasing'], got {temperature!r}"
+        )
+
+    def _ramp(length: int) -> list[float]:
+        if length <= 1:
+            return [0.0] * length
+        ramp = [2.0 * i / (length - 1) for i in range(length)]
+        return ramp if temperature == "increasing" else ramp[::-1]
+
+    if mode == "nonstationary":
+        mid = num_steps // 2
+        return _ramp(mid) + _ramp(num_steps - mid)
+    return _ramp(num_steps)
 
 
 def get_dataset(num_users: int):
@@ -207,6 +252,25 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     return prompt
 
 
+def get_aggregate_prompt(
+    liked_counts, disliked_counts, mid_to_data, top_k=TOP_K_AGGREGATE
+) -> str:
+    if not liked_counts and not disliked_counts:
+        return ""
+    prompt = "ACROSS ALL USERS SO FAR:\n"
+    top_liked = [mid for mid, _ in liked_counts.most_common(top_k)]
+    top_disliked = [mid for mid, _ in disliked_counts.most_common(top_k)]
+    if top_liked:
+        prompt += "Users tend to LIKE these movies:\n"
+        for mid in top_liked:
+            prompt += mid_to_data[mid] + "\n"
+    if top_disliked:
+        prompt += "Users tend to DISLIKE these movies:\n"
+        for mid in top_disliked:
+            prompt += mid_to_data[mid] + "\n"
+    return prompt
+
+
 def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
     m = re.search(r"CHOICE:\s*\[?\s*([1-9])", text)
     if not m:
@@ -216,13 +280,13 @@ def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
 
 
 def make_get_response(
-    runner: str, model: str, temperature: float, model_type: str,
+    runner: str, model: str, model_type: str,
     system: str | None = None,
 ):
     if runner == "ollama":
         from ollama_runner import generate
 
-        def _ollama_call(prompt: str) -> str:
+        def _ollama_call(prompt: str, temperature: float) -> str:
             return generate(model, prompt, system=system, temperature=temperature)
 
         return _ollama_call
@@ -230,7 +294,7 @@ def make_get_response(
     if runner == "vllm":
         from vllm_runner import generate as vllm_generate
 
-        def _vllm_call(prompt: str) -> str:
+        def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
                 model, prompt, system=system,
                 temperature=temperature, model_type=model_type,
@@ -241,7 +305,7 @@ def make_get_response(
     if runner == "huggingface":
         from huggingface_runner import generate as hf_generate
 
-        def _hf_call(prompt: str) -> str:
+        def _hf_call(prompt: str, temperature: float) -> str:
             return hf_generate(model, prompt, system=system, temperature=temperature)
 
         return _hf_call
@@ -249,7 +313,7 @@ def make_get_response(
     if runner == "openai":
         from openai_runner import generate as openai_generate
 
-        def _openai_call(prompt: str) -> str:
+        def _openai_call(prompt: str, temperature: float) -> str:
             return openai_generate(model, prompt, system=system, temperature=temperature)
 
         return _openai_call
@@ -257,7 +321,7 @@ def make_get_response(
     if runner == "random":
         sys_rng = random.SystemRandom()
 
-        def _random_call(_prompt: str) -> str:
+        def _random_call(_prompt: str, _temperature: float) -> str:
             return f"CHOICE: {sys_rng.randint(1, N_CHOICES)}"
 
         return _random_call
@@ -266,14 +330,14 @@ def make_get_response(
 
 
 def get_choice(
-    get_response, prompt: str
+    get_response, prompt: str, temperature: float
 ) -> tuple[int | None, str, float]:
     total_ms = 0.0
     last_resp = ""
     for _ in range(MAX_PARSE_RETRIES):
         t0 = time.perf_counter()
         try:
-            last_resp = get_response(prompt)
+            last_resp = get_response(prompt, temperature)
         except httpx.TimeoutException as e:
             total_ms += (time.perf_counter() - t0) * 1000
             last_resp = f"<timeout: {e}>"
@@ -302,7 +366,8 @@ def main():
     positive_only = args.positive_only
 
     random.seed(seed)
-    get_response = make_get_response(runner, model, temperature, model_type)
+    get_response = make_get_response(runner, model, model_type, BANDIT_PREAMBLE)
+    temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
 
     config_record = {
         "config_name": config_name,
@@ -367,6 +432,8 @@ def main():
             continue
 
         user_logs: dict[int, dict] = {}
+        liked_counts: Counter = Counter()
+        disliked_counts: Counter = Counter()
         steps_run = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
@@ -401,14 +468,15 @@ def main():
                 user_logs[uid]["interactions"],
                 positive_only,
             )
-            prompt = ""
+            prompt = get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
             if cs_mids_w:
                 prompt += get_coldstart_prompt(cs_mids_w, cs_labels_w, mid_to_data)
             prompt += get_history_prompt(interactions_w, mid_to_data, positive_only)
             prompt += get_score_prompt(user_logs[uid]["interactions"])
             prompt += get_candidates_prompt(cands, mid_to_data)
 
-            idx, raw, ms = get_choice(get_response, prompt)
+            temp = temp_schedule[step]
+            idx, raw, ms = get_choice(get_response, prompt, temp)
             chosen_mid = cands[idx] if idx is not None else None
             reward = labels[idx] if idx is not None else None
 
@@ -417,6 +485,7 @@ def main():
                 "impression_id": int(impr_id),
                 "candidates": cands,
                 "labels": labels,
+                "temperature": temp,
                 "prompt": prompt,
                 "raw_response": raw,
                 "choice_idx": idx,
@@ -425,6 +494,11 @@ def main():
                 "latency_ms": ms,
             })
             steps_run = step + 1
+
+            if reward == 1:
+                liked_counts[chosen_mid] += 1
+            elif reward == -1:
+                disliked_counts[chosen_mid] += 1
 
             tqdm.write(
                 f"step={step} runner={runner} model={model} "
