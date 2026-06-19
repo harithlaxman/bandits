@@ -21,6 +21,11 @@ MAX_PARSE_RETRIES = 3
 N_CHOICES = 5
 TOP_K_AGGREGATE = 3
 
+# openai (Azure) pricing, USD per 1M tokens.
+OPENAI_INPUT_COST_PER_1M = 2.0
+OPENAI_OUTPUT_COST_PER_1M = 8.0
+COST_REPORT_EVERY = 100
+
 BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandit. \
 Each round you are shown a user's taste profile and a set of candidate movies, and \
 you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
@@ -295,6 +300,13 @@ def get_choice(
     return None, last_resp, total_ms
 
 
+def openai_cost(usage: dict) -> float:
+    return (
+        usage["prompt_tokens"] / 1e6 * OPENAI_INPUT_COST_PER_1M
+        + usage["completion_tokens"] / 1e6 * OPENAI_OUTPUT_COST_PER_1M
+    )
+
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
@@ -313,10 +325,14 @@ def main():
     positive_only = args.positive_only
 
     random.seed(seed)
+    temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
     get_response = make_get_response(
         runner, model, temperature, model_type, BANDIT_PREAMBLE,
         top_p=top_p, top_k=top_k,
     )
+    get_usage = None
+    if runner == "openai":
+        from openai_runner import get_usage
 
     config_record = {
         "config_name": config_name,
@@ -450,6 +466,13 @@ def main():
                 f"choice_idx={idx} reward={reward}"
             )
 
+            if get_usage is not None and (step + 1) % COST_REPORT_EVERY == 0:
+                u = get_usage()
+                tqdm.write(
+                    f"[cost] cumulative ${openai_cost(u):.4f} "
+                    f"(in={u['prompt_tokens']} tok, out={u['completion_tokens']} tok)"
+                )
+
         epoch_record = {
             "epoch": epoch,
             "steps_run": steps_run,
@@ -468,6 +491,12 @@ def main():
         f"({num_epochs} total), {total_steps} new steps, "
         f"{total_users} new user-runs -> {out_dir}"
     )
+    if get_usage is not None:
+        u = get_usage()
+        print(
+            f"Total openai cost: ${openai_cost(u):.4f} "
+            f"(in={u['prompt_tokens']} tok, out={u['completion_tokens']} tok)"
+        )
 
 
 if __name__ == "__main__":

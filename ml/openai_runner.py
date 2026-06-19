@@ -8,6 +8,14 @@ _API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 
 _client: AzureOpenAI | None = None
 
+# Cumulative token usage across all generate() calls in this process.
+_USAGE = {"prompt_tokens": 0, "completion_tokens": 0}
+
+
+def get_usage() -> dict:
+    """Cumulative prompt/completion token counts since process start."""
+    return dict(_USAGE)
+
 
 def _get_client() -> AzureOpenAI:
     global _client
@@ -39,4 +47,7 @@ def generate(
         messages=messages,
         temperature=temperature,
     )
+    if resp.usage is not None:
+        _USAGE["prompt_tokens"] += resp.usage.prompt_tokens
+        _USAGE["completion_tokens"] += resp.usage.completion_tokens
     return resp.choices[0].message.content
