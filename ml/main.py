@@ -46,7 +46,7 @@ REQUIRED_CFG_KEYS = {
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
-VALID_RUNNERS = {"ollama", "vllm", "openai", "random", "huggingface"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "arc", "random", "huggingface"}
 RESUME_MATCH_KEYS = (
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature",
@@ -267,6 +267,14 @@ def make_get_response(
             return openai_generate(model, prompt, system=system, temperature=temperature)
 
         return _openai_call
+
+    if runner == "arc":
+        from arc_runner import generate as arc_generate
+
+        def _arc_call(prompt: str, temperature: float) -> str:
+            return arc_generate(model, prompt, system=system, temperature=temperature)
+
+        return _arc_call
 
     if runner == "random":
         sys_rng = random.SystemRandom()
