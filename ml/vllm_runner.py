@@ -1,4 +1,5 @@
 from vllm import LLM, SamplingParams
+from vllm.sampling_params import StructuredOutputsParams
 
 _llms = {}
 
@@ -20,15 +21,20 @@ def generate(
     top_p: float = 1.0,
     top_k: int = -1,
     model_type: str = "instruct",
+    choices: list[str] | None = None,
 ) -> str:
     llm = _get_llm(model)
 
+    structured_outputs = (
+        StructuredOutputsParams(choice=choices) if choices else None
+    )
     sampling_params = SamplingParams(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
         max_tokens=512,
         ignore_eos=False,
+        structured_outputs=structured_outputs,
     )
 
     if model_type in CHAT_MODEL_TYPES:

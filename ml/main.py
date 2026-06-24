@@ -89,7 +89,7 @@ def build_temperature_schedule(temperature, num_steps: int, mode: str) -> list[f
     """Per-step temperature schedule of length num_steps.
 
     A numeric `temperature` is constant. The strings "increasing"/"decreasing"
-    ramp linearly between 0.0 and 2.0 over the run; in nonstationary mode the
+    ramp linearly between 0.0 and 5.0 over the run; in nonstationary mode the
     ramp restarts at the midpoint so exploration ramps up again after the regime
     change.
     """
@@ -105,7 +105,7 @@ def build_temperature_schedule(temperature, num_steps: int, mode: str) -> list[f
     def _ramp(length: int) -> list[float]:
         if length <= 1:
             return [0.0] * length
-        ramp = [2.0 * i / (length - 1) for i in range(length)]
+        ramp = [5.0 * i / (length - 1) for i in range(length)]
         return ramp if temperature == "increasing" else ramp[::-1]
 
     if mode == "nonstationary":
@@ -195,8 +195,8 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        "Respond with ONLY your choice in this exact format and nothing else: "
-        '"CHOICE: <number>". Do not explain your reasoning or add any other text.\n'
+        "Respond with ONLY the number of your choice and nothing else. "
+        "Do not explain your reasoning or add any other text.\n"
     )
     return prompt
 
@@ -221,7 +221,7 @@ def get_aggregate_prompt(
 
 
 def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
-    m = re.search(r"CHOICE:\s*\[?\s*([1-9])", text)
+    m = re.match(r"\s*([1-9])\b", text)
     if not m:
         return None
     idx = int(m.group(1)) - 1
@@ -243,11 +243,13 @@ def make_get_response(
     if runner == "vllm":
         from vllm_runner import generate as vllm_generate
 
+        vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
+
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
                 model, prompt, system=system,
                 temperature=temperature, top_p=top_p, top_k=top_k,
-                model_type=model_type,
+                model_type=model_type, choices=vllm_choices,
             )
 
         return _vllm_call
@@ -280,7 +282,7 @@ def make_get_response(
         sys_rng = random.SystemRandom()
 
         def _random_call(_prompt: str, _temperature: float) -> str:
-            return f"CHOICE: {sys_rng.randint(1, N_CHOICES)}"
+            return str(sys_rng.randint(1, N_CHOICES))
 
         return _random_call
 

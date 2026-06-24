@@ -42,7 +42,7 @@ REQUIRED_CFG_KEYS = {
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
-VALID_RUNNERS = {"ollama", "vllm", "openai", "random", "huggingface"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "arc", "random", "huggingface"}
 RESUME_MATCH_KEYS = (
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature",
@@ -246,8 +246,8 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        "Respond with ONLY your choice in this exact format and nothing else: "
-        '"CHOICE: <number>". Do not explain your reasoning or add any other text.\n'
+        "Respond with ONLY the number of your choice and nothing else. "
+        "Do not explain your reasoning or add any other text.\n"
     )
     return prompt
 
@@ -272,7 +272,7 @@ def get_aggregate_prompt(
 
 
 def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
-    m = re.search(r"CHOICE:\s*\[?\s*([1-9])", text)
+    m = re.match(r"\s*([1-9])\b", text)
     if not m:
         return None
     idx = int(m.group(1)) - 1
@@ -294,11 +294,13 @@ def make_get_response(
     if runner == "vllm":
         from vllm_runner import generate as vllm_generate
 
+        vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
+
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
                 model, prompt, system=system,
                 temperature=temperature, top_p=top_p, top_k=top_k,
-                model_type=model_type,
+                model_type=model_type, choices=vllm_choices,
             )
 
         return _vllm_call
@@ -319,11 +321,19 @@ def make_get_response(
 
         return _openai_call
 
+    if runner == "arc":
+        from arc_runner import generate as arc_generate
+
+        def _arc_call(prompt: str, temperature: float) -> str:
+            return arc_generate(model, prompt, system=system, temperature=temperature)
+
+        return _arc_call
+
     if runner == "random":
         sys_rng = random.SystemRandom()
 
         def _random_call(_prompt: str, _temperature: float) -> str:
-            return f"CHOICE: {sys_rng.randint(1, N_CHOICES)}"
+            return str(sys_rng.randint(1, N_CHOICES))
 
         return _random_call
 
@@ -369,8 +379,9 @@ def main():
     positive_only = args.positive_only
 
     random.seed(seed)
+    temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
     get_response = make_get_response(
-        runner, model, temperature, model_type,
+        runner, model, temperature, model_type, BANDIT_PREAMBLE,
         top_p=top_p, top_k=top_k,
     )
 
