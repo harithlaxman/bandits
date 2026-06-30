@@ -43,30 +43,55 @@ thinking. Respond with only your final choice.
 
 
 REQUIRED_CFG_KEYS = {
-    "model", "runner", "num_epochs", "num_users",
-    "num_steps", "seed", "temperature", "output",
+    "model",
+    "runner",
+    "num_epochs",
+    "num_users",
+    "num_steps",
+    "seed",
+    "temperature",
+    "output",
 }
 VALID_RUNNERS = {"ollama", "vllm", "openai", "arc", "random", "huggingface"}
 RESUME_MATCH_KEYS = (
-    "model", "runner", "num_epochs", "num_users",
-    "num_steps", "seed", "temperature",
+    "model",
+    "runner",
+    "num_epochs",
+    "num_users",
+    "num_steps",
+    "seed",
+    "temperature",
 )
 
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", type=Path, required=True,
-                   help="path to a JSON config file (see configs/)")
-    p.add_argument("--resume", type=Path, default=None,
-                   help="path to an existing run dir to resume "
-                        "(must contain config.json + epochs.jsonl)")
-    p.add_argument("--mode", choices=["stationary", "nonstationary"],
-                   default="stationary",
-                   help="nonstationary: left-rotate the labels array by one after "
-                        "each user's 30th interaction (reward mapping shifts; "
-                        "candidate movies unchanged)")
-    p.add_argument("--positive-only", action="store_true",
-                   help="only include past recommendations the user LIKED in history prompt")
+    p.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="path to a JSON config file (see configs/)",
+    )
+    p.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="path to an existing run dir to resume "
+        "(must contain config.json + epochs.jsonl)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["stationary", "nonstationary"],
+        default="stationary",
+        help="nonstationary: left-rotate the labels array by one after "
+        "each user's 30th interaction (reward mapping shifts; "
+        "candidate movies unchanged)",
+    )
+    p.add_argument(
+        "--positive-only",
+        action="store_true",
+        help="only include past recommendations the user LIKED in history prompt",
+    )
     return p.parse_args()
 
 
@@ -229,11 +254,16 @@ def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
 
 
 def make_get_response(
-    runner: str, model: str, temperature: float, model_type: str,
-    system: str | None = None, top_p: float = 1.0, top_k: int = -1,
+    runner: str,
+    model: str,
+    temperature: float,
+    model_type: str,
+    system: str | None = None,
+    top_p: float = 1.0,
+    top_k: int = -1,
 ):
     if runner == "ollama":
-        from ollama_runner import generate
+        from utils.ollama_runner import generate
 
         def _ollama_call(prompt: str, temperature: float) -> str:
             return generate(model, prompt, system=system, temperature=temperature)
@@ -241,21 +271,26 @@ def make_get_response(
         return _ollama_call
 
     if runner == "vllm":
-        from vllm_runner import generate as vllm_generate
+        from utils.vllm_runner import generate as vllm_generate
 
         vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
 
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
-                model, prompt, system=system,
-                temperature=temperature, top_p=top_p, top_k=top_k,
-                model_type=model_type, choices=vllm_choices,
+                model,
+                prompt,
+                system=system,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                model_type=model_type,
+                choices=vllm_choices,
             )
 
         return _vllm_call
 
     if runner == "huggingface":
-        from huggingface_runner import generate as hf_generate
+        from utils.huggingface_runner import generate as hf_generate
 
         def _hf_call(prompt: str, temperature: float) -> str:
             return hf_generate(model, prompt, system=system, temperature=temperature)
@@ -263,15 +298,17 @@ def make_get_response(
         return _hf_call
 
     if runner == "openai":
-        from openai_runner import generate as openai_generate
+        from utils.openai_runner import generate as openai_generate
 
         def _openai_call(prompt: str, temperature: float) -> str:
-            return openai_generate(model, prompt, system=system, temperature=temperature)
+            return openai_generate(
+                model, prompt, system=system, temperature=temperature
+            )
 
         return _openai_call
 
     if runner == "arc":
-        from arc_runner import generate as arc_generate
+        from utils.arc_runner import generate as arc_generate
 
         def _arc_call(prompt: str, temperature: float) -> str:
             return arc_generate(model, prompt, system=system, temperature=temperature)
@@ -320,29 +357,36 @@ def openai_cost(usage: dict) -> float:
 def main():
     args = parse_args()
     cfg = load_config(args.config)
-    model       = cfg["model"]
-    runner      = cfg["runner"]
-    num_epochs  = cfg["num_epochs"]
-    num_users   = cfg["num_users"]
-    num_steps   = cfg["num_steps"]
-    seed        = cfg["seed"]
+    model = cfg["model"]
+    runner = cfg["runner"]
+    num_epochs = cfg["num_epochs"]
+    num_users = cfg["num_users"]
+    num_steps = cfg["num_steps"]
+    seed = cfg["seed"]
     temperature = cfg["temperature"]
-    top_p       = cfg.get("top_p", 1.0)
-    top_k       = cfg.get("top_k", -1)
-    output      = cfg["output"]
+    top_p = cfg.get("top_p", 0.95)
+    top_k = cfg.get("top_k", -1)
+    output = cfg["output"]
     config_name = cfg["config_name"]
-    model_type  = cfg.get("model_type", "instruct")
+    model_type = cfg.get("model_type", "instruct")
     positive_only = args.positive_only
 
     random.seed(seed)
     temp_schedule = build_temperature_schedule(temperature, num_steps, args.mode)
+
     get_response = make_get_response(
-        runner, model, temperature, model_type, BANDIT_PREAMBLE,
-        top_p=top_p, top_k=top_k,
+        runner,
+        model,
+        temperature,
+        model_type,
+        BANDIT_PREAMBLE,
+        top_p=top_p,
+        top_k=top_k,
     )
+
     get_usage = None
     if runner == "openai":
-        from openai_runner import get_usage
+        from utils.openai_runner import get_usage
 
     config_record = {
         "config_name": config_name,
@@ -441,7 +485,9 @@ def main():
             prompt = (
                 get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
                 + user_logs[uid]["cold_start_prompt"]
-                + get_history_prompt(user_logs[uid]["interactions"], mid_to_data, positive_only)
+                + get_history_prompt(
+                    user_logs[uid]["interactions"], mid_to_data, positive_only
+                )
                 + get_score_prompt(user_logs[uid]["interactions"])
                 + get_candidates_prompt(cands, mid_to_data)
             )
@@ -451,19 +497,21 @@ def main():
             chosen_mid = cands[idx] if idx is not None else None
             reward = labels[idx] if idx is not None else None
 
-            user_logs[uid]["interactions"].append({
-                "step": step,
-                "impression_id": int(impr_id),
-                "candidates": cands,
-                "labels": labels,
-                "temperature": temp,
-                "prompt": prompt,
-                "raw_response": raw,
-                "choice_idx": idx,
-                "chosen_mid": chosen_mid,
-                "reward": reward,
-                "latency_ms": ms,
-            })
+            user_logs[uid]["interactions"].append(
+                {
+                    "step": step,
+                    "impression_id": int(impr_id),
+                    "candidates": cands,
+                    "labels": labels,
+                    "temperature": temp,
+                    "prompt": prompt,
+                    "raw_response": raw,
+                    "choice_idx": idx,
+                    "chosen_mid": chosen_mid,
+                    "reward": reward,
+                    "latency_ms": ms,
+                }
+            )
             steps_run = step + 1
 
             if reward == 1:

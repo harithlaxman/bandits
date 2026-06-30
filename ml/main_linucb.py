@@ -23,8 +23,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from bandits import make_model
-from features import PHI_DIM, MovieStore, UserState
+from utils.bandits import make_model
+from utils.features import PHI_DIM, MovieStore, UserState
 from main_sliding import get_dataset
 
 REQUIRED_CFG_KEYS = {

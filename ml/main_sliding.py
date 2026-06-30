@@ -284,7 +284,7 @@ def make_get_response(
     system: str | None = None, top_p: float = 1.0, top_k: int = -1,
 ):
     if runner == "ollama":
-        from ollama_runner import generate
+        from utils.ollama_runner import generate
 
         def _ollama_call(prompt: str, temperature: float) -> str:
             return generate(model, prompt, system=system, temperature=temperature)
@@ -292,7 +292,7 @@ def make_get_response(
         return _ollama_call
 
     if runner == "vllm":
-        from vllm_runner import generate as vllm_generate
+        from utils.vllm_runner import generate as vllm_generate
 
         vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
 
@@ -306,7 +306,7 @@ def make_get_response(
         return _vllm_call
 
     if runner == "huggingface":
-        from huggingface_runner import generate as hf_generate
+        from utils.huggingface_runner import generate as hf_generate
 
         def _hf_call(prompt: str, temperature: float) -> str:
             return hf_generate(model, prompt, system=system, temperature=temperature)
@@ -314,7 +314,7 @@ def make_get_response(
         return _hf_call
 
     if runner == "openai":
-        from openai_runner import generate as openai_generate
+        from utils.openai_runner import generate as openai_generate
 
         def _openai_call(prompt: str, temperature: float) -> str:
             return openai_generate(model, prompt, system=system, temperature=temperature)
@@ -322,7 +322,7 @@ def make_get_response(
         return _openai_call
 
     if runner == "arc":
-        from arc_runner import generate as arc_generate
+        from utils.arc_runner import generate as arc_generate
 
         def _arc_call(prompt: str, temperature: float) -> str:
             return arc_generate(model, prompt, system=system, temperature=temperature)
