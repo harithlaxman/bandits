@@ -1,0 +1,10 @@
+{
+  "model": "gpt-4.1",
+  "runner": "openai",
+  "num_epochs": 10,
+  "num_users": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "temperature": 1.0,
+  "output": "./data/outputs"
+}

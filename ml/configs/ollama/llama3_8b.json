@@ -1,0 +1,10 @@
+{
+  "model": "llama3.1:latest",
+  "runner": "ollama",
+  "num_epochs": 1,
+  "num_users": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "temperature": 0.0,
+  "output": "./data/outputs"
+}
