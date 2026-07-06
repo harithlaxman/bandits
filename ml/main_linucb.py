@@ -28,7 +28,7 @@ from utils.features import PHI_DIM, MovieStore, UserState
 from main_sliding import get_dataset
 
 REQUIRED_CFG_KEYS = {
-    "algo", "num_epochs", "num_users", "num_steps", "seed", "output",
+    "algo", "model_name", "num_epochs", "num_users", "num_steps", "seed", "output",
 }
 VALID_ALGOS = {"linucb", "lints"}
 RESUME_MATCH_KEYS = (
@@ -74,7 +74,6 @@ def load_config(path: Path) -> dict:
     if cfg["model"] is None:
         cfg["model"] = cfg["algo"]
     cfg["output"] = Path(cfg["output"])
-    cfg["config_name"] = path.stem
     return cfg
 
 
@@ -87,7 +86,7 @@ def main():
     num_steps      = cfg["num_steps"]
     seed           = cfg["seed"]
     output         = cfg["output"]
-    config_name    = cfg["config_name"]
+    model_name     = cfg["model_name"]
     alpha          = cfg["alpha"]
     lam            = cfg["lambda"]
     v              = cfg["v"]
@@ -101,7 +100,7 @@ def main():
     store = MovieStore.from_metadata(use_embeddings, embed_model)
 
     config_record = {
-        "config_name": config_name,
+        "model_name": model_name,
         "model": model_label,
         "runner": "bandit",
         "algo": algo,
@@ -143,7 +142,7 @@ def main():
         print(f"resuming {out_dir}: {n_completed} epoch(s) already completed")
     else:
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        out_dir = output / f"{config_name}_{algo}_{timestamp}"
+        out_dir = output / f"{model_name}_{timestamp}"
         out_dir.mkdir(parents=True, exist_ok=True)
         config_record["timestamp"] = timestamp
         with open(out_dir / "config.json", "w") as f:

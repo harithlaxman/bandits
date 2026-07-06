@@ -1,6 +1,7 @@
 {
   "model": "meta-llama/Llama-3.2-1B-Instruct",
-  "runner": "huggingface",
+  "model_name": "llama3.2-1b",
+  "runner": "vllm",
   "num_epochs": 10,
   "num_users": 10,
   "num_steps": 500,

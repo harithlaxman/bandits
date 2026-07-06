@@ -1,5 +1,6 @@
 {
   "model": "random",
+  "model_name": "random",
   "runner": "random",
   "num_epochs": 10,
   "num_users": 20,

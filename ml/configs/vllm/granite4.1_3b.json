@@ -1,10 +1,11 @@
 {
   "model": "ibm-granite/granite-4.1-3b",
+  "model_name": "granite4.1-3b",
   "runner": "vllm",
   "num_epochs": 10,
   "num_users": 20,
   "num_steps": 1000,
   "seed": 42,
   "temperature": 0.0,
-  "output": "./data/outputs"
+  "output": "./data/outputs/granite4.1_3b/"
 }

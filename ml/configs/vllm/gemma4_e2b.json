@@ -1,10 +1,11 @@
 {
-  "model": "/common/data/models/google--gemma-4-E2B-it",
-  "runner": "vllm",
-  "num_epochs": 10,
-  "num_users": 20,
-  "num_steps": 1000,
-  "seed": 42,
-  "temperature": 0.0,
-  "output": "./data/outputs"
+    "model": "google/gemma-4-E2B-it",
+    "model_name": "gemma4-e2b",
+    "runner": "vllm",
+    "num_epochs": 10,
+    "num_users": 20,
+    "num_steps": 1000,
+    "seed": 42,
+    "temperature": 0.0,
+    "output": "./data/outputs/gemma4_e2b"
 }

@@ -1,5 +1,6 @@
 {
   "model": "gpt-4.1",
+  "model_name": "gpt-4.1",
   "runner": "openai",
   "num_epochs": 10,
   "num_users": 20,

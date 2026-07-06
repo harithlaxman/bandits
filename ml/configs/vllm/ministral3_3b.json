@@ -1,6 +1,7 @@
 {
   "model": "mistralai/Ministral-3-3B-Instruct-2512",
-  "runner": "huggingface",
+  "model_name": "ministral3-3b",
+  "runner": "vllm",
   "num_epochs": 10,
   "num_users": 20,
   "num_steps": 1000,
