@@ -5,7 +5,7 @@ import os
 import random
 import re
 import time
-from collections import Counter, deque
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -20,7 +20,6 @@ METADATA_CSV = DATA_DIR / "metadata.csv"
 MAX_PARSE_RETRIES = 3
 N_CHOICES = 5
 MAX_CONTEXT = 10
-TOP_K_AGGREGATE = 3
 
 BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandit. \
 Each round you are shown a user's taste profile and a set of candidate movies, and \
@@ -39,10 +38,10 @@ thinking. Respond with only your final choice.
 
 
 REQUIRED_CFG_KEYS = {
-    "model", "runner", "num_epochs", "num_users",
+    "model", "model_name", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature", "output",
 }
-VALID_RUNNERS = {"ollama", "vllm", "openai", "arc", "random", "huggingface"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "random"}
 RESUME_MATCH_KEYS = (
     "model", "runner", "num_epochs", "num_users",
     "num_steps", "seed", "temperature",
@@ -77,7 +76,6 @@ def load_config(path: Path) -> dict:
             f"unknown runner: {cfg['runner']!r} (valid: {sorted(VALID_RUNNERS)})"
         )
     cfg["output"] = Path(cfg["output"])
-    cfg["config_name"] = path.stem
     return cfg
 
 
@@ -252,25 +250,6 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     return prompt
 
 
-def get_aggregate_prompt(
-    liked_counts, disliked_counts, mid_to_data, top_k=TOP_K_AGGREGATE
-) -> str:
-    if not liked_counts and not disliked_counts:
-        return ""
-    prompt = "ACROSS ALL USERS SO FAR:\n"
-    top_liked = [mid for mid, _ in liked_counts.most_common(top_k)]
-    top_disliked = [mid for mid, _ in disliked_counts.most_common(top_k)]
-    if top_liked:
-        prompt += "Users tend to LIKE these movies:\n"
-        for mid in top_liked:
-            prompt += mid_to_data[mid] + "\n"
-    if top_disliked:
-        prompt += "Users tend to DISLIKE these movies:\n"
-        for mid in top_disliked:
-            prompt += mid_to_data[mid] + "\n"
-    return prompt
-
-
 def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
     m = re.match(r"\s*([1-9])\b", text)
     if not m:
@@ -305,14 +284,6 @@ def make_get_response(
 
         return _vllm_call
 
-    if runner == "huggingface":
-        from utils.huggingface_runner import generate as hf_generate
-
-        def _hf_call(prompt: str, temperature: float) -> str:
-            return hf_generate(model, prompt, system=system, temperature=temperature)
-
-        return _hf_call
-
     if runner == "openai":
         from utils.openai_runner import generate as openai_generate
 
@@ -320,14 +291,6 @@ def make_get_response(
             return openai_generate(model, prompt, system=system, temperature=temperature)
 
         return _openai_call
-
-    if runner == "arc":
-        from utils.arc_runner import generate as arc_generate
-
-        def _arc_call(prompt: str, temperature: float) -> str:
-            return arc_generate(model, prompt, system=system, temperature=temperature)
-
-        return _arc_call
 
     if runner == "random":
         sys_rng = random.SystemRandom()
@@ -374,7 +337,7 @@ def main():
     top_p       = cfg.get("top_p", 1.0)
     top_k       = cfg.get("top_k", -1)
     output      = cfg["output"]
-    config_name = cfg["config_name"]
+    model_name  = cfg["model_name"]
     model_type  = cfg.get("model_type", "instruct")
     positive_only = args.positive_only
 
@@ -386,7 +349,7 @@ def main():
     )
 
     config_record = {
-        "config_name": config_name,
+        "model_name": model_name,
         "model": model,
         "runner": runner,
         "num_epochs": num_epochs,
@@ -426,9 +389,8 @@ def main():
                 n_completed = sum(1 for line in f if line.strip())
         print(f"resuming {out_dir}: {n_completed} epoch(s) already completed")
     else:
-        model_slug = model.replace(":", "_").replace("/", "_")
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        out_dir = output / f"{config_name}_{model_slug}_{timestamp}"
+        out_dir = output / f"{model_name}_{timestamp}"
         out_dir.mkdir(parents=True, exist_ok=True)
         config_record["timestamp"] = timestamp
         with open(out_dir / "config.json", "w") as f:
@@ -450,8 +412,6 @@ def main():
             continue
 
         user_logs: dict[int, dict] = {}
-        liked_counts: Counter = Counter()
-        disliked_counts: Counter = Counter()
         steps_run = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
@@ -486,7 +446,7 @@ def main():
                 user_logs[uid]["interactions"],
                 positive_only,
             )
-            prompt = get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
+            prompt = ""
             if cs_mids_w:
                 prompt += get_coldstart_prompt(cs_mids_w, cs_labels_w, mid_to_data)
             prompt += get_history_prompt(interactions_w, mid_to_data, positive_only)
@@ -512,11 +472,6 @@ def main():
                 "latency_ms": ms,
             })
             steps_run = step + 1
-
-            if reward == 1:
-                liked_counts[chosen_mid] += 1
-            elif reward == -1:
-                disliked_counts[chosen_mid] += 1
 
             tqdm.write(
                 f"step={step} runner={runner} model={model} "

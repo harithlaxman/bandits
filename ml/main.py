@@ -5,7 +5,7 @@ import os
 import random
 import re
 import time
-from collections import Counter, deque
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -19,7 +19,6 @@ METADATA_CSV = DATA_DIR / "metadata.csv"
 
 MAX_PARSE_RETRIES = 3
 N_CHOICES = 5
-TOP_K_AGGREGATE = 3
 
 # openai (Azure) pricing, USD per 1M tokens.
 OPENAI_INPUT_COST_PER_1M = 2.0
@@ -37,13 +36,15 @@ tastes you cannot yet predict. This pays off most when you know little about the
 user.
 
 Weigh these two strategies internally, but do NOT reason out loud or explain your \
-thinking. Respond with only your final choice.
+thinking. Respond with only two numbers: your final choice, then a second number \
+that is 1 if this pick is an EXPLORATION move or 2 if it is an EXPLOITATION move.
 
 """
 
 
 REQUIRED_CFG_KEYS = {
     "model",
+    "model_name",
     "runner",
     "num_epochs",
     "num_users",
@@ -52,7 +53,7 @@ REQUIRED_CFG_KEYS = {
     "temperature",
     "output",
 }
-VALID_RUNNERS = {"ollama", "vllm", "openai", "arc", "random", "huggingface"}
+VALID_RUNNERS = {"ollama", "vllm", "openai", "random"}
 RESUME_MATCH_KEYS = (
     "model",
     "runner",
@@ -106,7 +107,6 @@ def load_config(path: Path) -> dict:
             f"unknown runner: {cfg['runner']!r} (valid: {sorted(VALID_RUNNERS)})"
         )
     cfg["output"] = Path(cfg["output"])
-    cfg["config_name"] = path.stem
     return cfg
 
 
@@ -220,37 +220,31 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        "Respond with ONLY the number of your choice and nothing else. "
+        "Respond with ONLY two numbers separated by a space: the number of your "
+        "choice, then 1 if this pick is an exploration move or 2 if it is an "
+        'exploitation move. Example: "3 2". '
         "Do not explain your reasoning or add any other text.\n"
     )
     return prompt
 
 
-def get_aggregate_prompt(
-    liked_counts, disliked_counts, mid_to_data, top_k=TOP_K_AGGREGATE
-) -> str:
-    if not liked_counts and not disliked_counts:
-        return ""
-    prompt = "ACROSS ALL USERS SO FAR:\n"
-    top_liked = [mid for mid, _ in liked_counts.most_common(top_k)]
-    top_disliked = [mid for mid, _ in disliked_counts.most_common(top_k)]
-    if top_liked:
-        prompt += "Users tend to LIKE these movies:\n"
-        for mid in top_liked:
-            prompt += mid_to_data[mid] + "\n"
-    if top_disliked:
-        prompt += "Users tend to DISLIKE these movies:\n"
-        for mid in top_disliked:
-            prompt += mid_to_data[mid] + "\n"
-    return prompt
+def parse_response(text: str, n: int = N_CHOICES) -> tuple[int | None, int | None]:
+    """Parse the model reply into (choice_idx, explore_exploit).
 
-
-def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
+    choice_idx is 0-based or None if no valid choice number is present.
+    explore_exploit is 1 (explore) / 2 (exploit) / None if absent or unparsable.
+    The two are parsed independently so a valid choice with a missing or garbled
+    flag still yields the choice.
+    """
     m = re.match(r"\s*([1-9])\b", text)
     if not m:
-        return None
+        return None, None
     idx = int(m.group(1)) - 1
-    return idx if 0 <= idx < n else None
+    if not 0 <= idx < n:
+        return None, None
+    mode_match = re.match(r"\s*[1-9]\D+([12])\b", text)
+    mode = int(mode_match.group(1)) if mode_match else None
+    return idx, mode
 
 
 def make_get_response(
@@ -273,7 +267,9 @@ def make_get_response(
     if runner == "vllm":
         from utils.vllm_runner import generate as vllm_generate
 
-        vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
+        vllm_choices = [
+            f"{c} {m}" for c in range(1, N_CHOICES + 1) for m in (1, 2)
+        ]
 
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
@@ -289,14 +285,6 @@ def make_get_response(
 
         return _vllm_call
 
-    if runner == "huggingface":
-        from utils.huggingface_runner import generate as hf_generate
-
-        def _hf_call(prompt: str, temperature: float) -> str:
-            return hf_generate(model, prompt, system=system, temperature=temperature)
-
-        return _hf_call
-
     if runner == "openai":
         from utils.openai_runner import generate as openai_generate
 
@@ -307,19 +295,11 @@ def make_get_response(
 
         return _openai_call
 
-    if runner == "arc":
-        from utils.arc_runner import generate as arc_generate
-
-        def _arc_call(prompt: str, temperature: float) -> str:
-            return arc_generate(model, prompt, system=system, temperature=temperature)
-
-        return _arc_call
-
     if runner == "random":
         sys_rng = random.SystemRandom()
 
         def _random_call(_prompt: str, _temperature: float) -> str:
-            return str(sys_rng.randint(1, N_CHOICES))
+            return f"{sys_rng.randint(1, N_CHOICES)} {sys_rng.randint(1, 2)}"
 
         return _random_call
 
@@ -328,7 +308,7 @@ def make_get_response(
 
 def get_choice(
     get_response, prompt: str, temperature: float
-) -> tuple[int | None, str, float]:
+) -> tuple[int | None, int | None, str, float]:
     total_ms = 0.0
     last_resp = ""
     for _ in range(MAX_PARSE_RETRIES):
@@ -341,10 +321,10 @@ def get_choice(
             tqdm.write(last_resp)
             continue
         total_ms += (time.perf_counter() - t0) * 1000
-        idx = parse_choice(last_resp)
+        idx, mode = parse_response(last_resp)
         if idx is not None:
-            return idx, last_resp, total_ms
-    return None, last_resp, total_ms
+            return idx, mode, last_resp, total_ms
+    return None, None, last_resp, total_ms
 
 
 def openai_cost(usage: dict) -> float:
@@ -367,7 +347,7 @@ def main():
     top_p = cfg.get("top_p", 0.95)
     top_k = cfg.get("top_k", -1)
     output = cfg["output"]
-    config_name = cfg["config_name"]
+    model_name = cfg["model_name"]
     model_type = cfg.get("model_type", "instruct")
     positive_only = args.positive_only
 
@@ -389,7 +369,7 @@ def main():
         from utils.openai_runner import get_usage
 
     config_record = {
-        "config_name": config_name,
+        "model_name": model_name,
         "model": model,
         "runner": runner,
         "num_epochs": num_epochs,
@@ -428,9 +408,8 @@ def main():
                 n_completed = sum(1 for line in f if line.strip())
         print(f"resuming {out_dir}: {n_completed} epoch(s) already completed")
     else:
-        model_slug = model.replace(":", "_").replace("/", "_")
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        out_dir = output / f"{config_name}_{model_slug}_{timestamp}"
+        out_dir = output / f"{model_name}_{timestamp}"
         out_dir.mkdir(parents=True, exist_ok=True)
         config_record["timestamp"] = timestamp
         with open(out_dir / "config.json", "w") as f:
@@ -452,8 +431,6 @@ def main():
             continue
 
         user_logs: dict[int, dict] = {}
-        liked_counts: Counter = Counter()
-        disliked_counts: Counter = Counter()
         steps_run = 0
 
         for step in tqdm(range(num_steps), desc=f"epoch {epoch}"):
@@ -483,8 +460,7 @@ def main():
                 }
 
             prompt = (
-                get_aggregate_prompt(liked_counts, disliked_counts, mid_to_data)
-                + user_logs[uid]["cold_start_prompt"]
+                user_logs[uid]["cold_start_prompt"]
                 + get_history_prompt(
                     user_logs[uid]["interactions"], mid_to_data, positive_only
                 )
@@ -493,7 +469,7 @@ def main():
             )
 
             temp = temp_schedule[step]
-            idx, raw, ms = get_choice(get_response, prompt, temp)
+            idx, mode, raw, ms = get_choice(get_response, prompt, temp)
             chosen_mid = cands[idx] if idx is not None else None
             reward = labels[idx] if idx is not None else None
 
@@ -507,6 +483,7 @@ def main():
                     "prompt": prompt,
                     "raw_response": raw,
                     "choice_idx": idx,
+                    "explore_exploit": mode,
                     "chosen_mid": chosen_mid,
                     "reward": reward,
                     "latency_ms": ms,
@@ -514,14 +491,9 @@ def main():
             )
             steps_run = step + 1
 
-            if reward == 1:
-                liked_counts[chosen_mid] += 1
-            elif reward == -1:
-                disliked_counts[chosen_mid] += 1
-
             tqdm.write(
                 f"step={step} runner={runner} model={model} "
-                f"choice_idx={idx} reward={reward}"
+                f"choice_idx={idx} explore_exploit={mode} reward={reward}"
             )
 
             if get_usage is not None and (step + 1) % COST_REPORT_EVERY == 0:
