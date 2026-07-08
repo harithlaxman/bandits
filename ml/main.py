@@ -27,14 +27,14 @@ COST_REPORT_EVERY = 100
 
 BANDIT_PREAMBLE = """You are an expert movierecommendation agent acting as a contextual bandit. \
 Each round you are shown the history of interactions and a set of candidate movies. \
-Your job is to pick exactly ONE candidate to recommend; you then learn whether the user LIKED it.\
-Your goal is to enhance the user’s viewing experience by providing personalized and engaging movie
+Your job is to pick exactly ONE candidate to recommend; you then learn whether the user LIKED it. \
+Your goal is to enhance the user's viewing experience by providing personalized and engaging movie \
 suggestions. Your objective is to MAXIMIZE the total number of liked recommendations.
 
-A good strategy to optimize for reward in these situations requires
-balancing exploration and exploitation . You need to explore to try out different movies \
-and find those with high rewards , but you also have to exploit the information that \
-you have to accumulate rewards .
+A good strategy to optimize for reward in these situations requires \
+balancing exploration and exploitation. You need to explore to try out different movies \
+and find those with high rewards, but you also have to exploit the information that \
+you have to accumulate rewards.
 
 Weigh these two strategies internally, but do NOT reason out loud or explain your \
 thinking. Respond with only your final choice.
@@ -229,31 +229,19 @@ def get_candidates_prompt(mids: List[int], mid_to_data) -> str:
     for i, mid in enumerate(mids, 1):
         prompt += f"{i}.\n{mid_to_data[mid]}\n"
     prompt += (
-        "Respond with ONLY two numbers separated by a space: the number of your "
-        "choice, then 1 if this pick is an exploration move or 2 if it is an "
-        'exploitation move. Example: "3 2". '
+        "Respond with ONLY the number of your choice and nothing else. "
         "Do not explain your reasoning or add any other text.\n"
     )
     return prompt
 
 
-def parse_response(text: str, n: int = N_CHOICES) -> tuple[int | None, int | None]:
-    """Parse the model reply into (choice_idx, explore_exploit).
-
-    choice_idx is 0-based or None if no valid choice number is present.
-    explore_exploit is 1 (explore) / 2 (exploit) / None if absent or unparsable.
-    The two are parsed independently so a valid choice with a missing or garbled
-    flag still yields the choice.
-    """
+def parse_choice(text: str, n: int = N_CHOICES) -> int | None:
+    """Parse the model reply into a 0-based choice index, or None if absent."""
     m = re.match(r"\s*([1-9])\b", text)
     if not m:
-        return None, None
+        return None
     idx = int(m.group(1)) - 1
-    if not 0 <= idx < n:
-        return None, None
-    mode_match = re.match(r"\s*[1-9]\D+([12])\b", text)
-    mode = int(mode_match.group(1)) if mode_match else None
-    return idx, mode
+    return idx if 0 <= idx < n else None
 
 
 def make_get_response(
@@ -276,7 +264,7 @@ def make_get_response(
     if runner == "vllm":
         from utils.vllm_runner import generate as vllm_generate
 
-        vllm_choices = [f"{c} {m}" for c in range(1, N_CHOICES + 1) for m in (1, 2)]
+        vllm_choices = [str(i) for i in range(1, N_CHOICES + 1)]
 
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(
@@ -306,7 +294,7 @@ def make_get_response(
         sys_rng = random.SystemRandom()
 
         def _random_call(_prompt: str, _temperature: float) -> str:
-            return f"{sys_rng.randint(1, N_CHOICES)} {sys_rng.randint(1, 2)}"
+            return str(sys_rng.randint(1, N_CHOICES))
 
         return _random_call
 
@@ -315,7 +303,7 @@ def make_get_response(
 
 def get_choice(
     get_response, prompt: str, temperature: float
-) -> tuple[int | None, int | None, str, float]:
+) -> tuple[int | None, str, float]:
     total_ms = 0.0
     last_resp = ""
     for _ in range(MAX_PARSE_RETRIES):
@@ -328,10 +316,10 @@ def get_choice(
             tqdm.write(last_resp)
             continue
         total_ms += (time.perf_counter() - t0) * 1000
-        idx, mode = parse_response(last_resp)
+        idx = parse_choice(last_resp)
         if idx is not None:
-            return idx, mode, last_resp, total_ms
-    return None, None, last_resp, total_ms
+            return idx, last_resp, total_ms
+    return None, last_resp, total_ms
 
 
 def openai_cost(usage: dict) -> float:
@@ -476,7 +464,7 @@ def main():
             )
 
             temp = temp_schedule[step]
-            idx, mode, raw, ms = get_choice(get_response, prompt, temp)
+            idx, raw, ms = get_choice(get_response, prompt, temp)
             chosen_mid = cands[idx] if idx is not None else None
             reward = labels[idx] if idx is not None else None
 
@@ -490,7 +478,6 @@ def main():
                     "prompt": prompt,
                     "raw_response": raw,
                     "choice_idx": idx,
-                    "explore_exploit": mode,
                     "chosen_mid": chosen_mid,
                     "reward": reward,
                     "latency_ms": ms,
@@ -500,7 +487,7 @@ def main():
 
             tqdm.write(
                 f"step={step} runner={runner} model={model} "
-                f"choice_idx={idx} explore_exploit={mode} reward={reward}"
+                f"choice_idx={idx} reward={reward}"
             )
 
             if get_usage is not None and (step + 1) % COST_REPORT_EVERY == 0:
