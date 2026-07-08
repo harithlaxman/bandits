@@ -25,20 +25,19 @@ OPENAI_INPUT_COST_PER_1M = 2.0
 OPENAI_OUTPUT_COST_PER_1M = 8.0
 COST_REPORT_EVERY = 100
 
-BANDIT_PREAMBLE = """You are a recommendation agent acting as a contextual bandit. \
-Each round you are shown a user's taste profile and a set of candidate movies, and \
-you pick exactly ONE candidate to recommend; you then learn whether the user LIKED \
-it. Your objective is to MAXIMIZE the total number of liked recommendations over \
-several rounds. To do this, internally consider two competing pressures:
-- EXPLOITATION: recommend movies you are confident this user will like.
-- EXPLORATION: recommend movies whose appeal is uncertain, to learn \
-tastes you cannot yet predict. This pays off most when you know little about the \
-user.
+BANDIT_PREAMBLE = """You are an expert movierecommendation agent acting as a contextual bandit. \
+Each round you are shown the history of interactions and a set of candidate movies. \
+Your job is to pick exactly ONE candidate to recommend; you then learn whether the user LIKED it.\
+Your goal is to enhance the user’s viewing experience by providing personalized and engaging movie
+suggestions. Your objective is to MAXIMIZE the total number of liked recommendations.
+
+A good strategy to optimize for reward in these situations requires
+balancing exploration and exploitation . You need to explore to try out different movies \
+and find those with high rewards , but you also have to exploit the information that \
+you have to accumulate rewards .
 
 Weigh these two strategies internally, but do NOT reason out loud or explain your \
-thinking. Respond with only two numbers: your final choice, then a second number \
-that is 1 if this pick is an EXPLORATION move or 2 if it is an EXPLOITATION move.
-
+thinking. Respond with only your final choice.
 """
 
 
@@ -192,18 +191,28 @@ def get_coldstart_prompt(mids: List[int], labels: List[int], mid_to_data) -> str
 def get_history_prompt(
     interactions: list[dict], mid_to_data, positive_only: bool
 ) -> str:
-    prompt = "YOUR PAST RECOMMENDATIONS:\n"
+    liked, neutral, disliked = [], [], []
     for it in interactions:
         if it["chosen_mid"] is None:
             continue
-        if positive_only and it["reward"] != 1:
-            continue
-        prompt += "You recommended:\n"
-        prompt += mid_to_data[it["chosen_mid"]]
         if it["reward"] == 1:
-            prompt += "and the user LIKED the movie\n"
+            liked.append(it["chosen_mid"])
+        elif it["reward"] == -1:
+            disliked.append(it["chosen_mid"])
         else:
-            prompt += "but the user DID NOT LIKE the movie\n"
+            neutral.append(it["chosen_mid"])
+
+    prompt = "YOUR PAST RECOMMENDATIONS:\n"
+    sections = [("Movies the user LIKED:\n", liked)]
+    if not positive_only:
+        sections.append(("Movies the user DIDN'T ENJOY AS MUCH:\n", neutral))
+        sections.append(("Movies the user DISLIKED:\n", disliked))
+    for header, mids in sections:
+        if not mids:
+            continue
+        prompt += header
+        for mid in mids:
+            prompt += mid_to_data[mid] + "\n"
     return prompt
 
 
@@ -267,9 +276,7 @@ def make_get_response(
     if runner == "vllm":
         from utils.vllm_runner import generate as vllm_generate
 
-        vllm_choices = [
-            f"{c} {m}" for c in range(1, N_CHOICES + 1) for m in (1, 2)
-        ]
+        vllm_choices = [f"{c} {m}" for c in range(1, N_CHOICES + 1) for m in (1, 2)]
 
         def _vllm_call(prompt: str, temperature: float) -> str:
             return vllm_generate(

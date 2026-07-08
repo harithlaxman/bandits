@@ -161,18 +161,28 @@ def get_coldstart_prompt(mids: List[int], labels: List[int], mid_to_data) -> str
 def get_history_prompt(
     interactions: list[dict], mid_to_data, positive_only: bool
 ) -> str:
-    prompt = "YOUR PAST RECOMMENDATIONS:\n"
+    liked, neutral, disliked = [], [], []
     for it in interactions:
         if it["chosen_mid"] is None:
             continue
-        if positive_only and it["reward"] != 1:
-            continue
-        prompt += "You recommended:\n"
-        prompt += mid_to_data[it["chosen_mid"]]
         if it["reward"] == 1:
-            prompt += "and the user LIKED the movie\n"
+            liked.append(it["chosen_mid"])
+        elif it["reward"] == -1:
+            disliked.append(it["chosen_mid"])
         else:
-            prompt += "but the user DID NOT LIKE the movie\n"
+            neutral.append(it["chosen_mid"])
+
+    prompt = "YOUR PAST RECOMMENDATIONS:\n"
+    sections = [("Movies the user LIKED:\n", liked)]
+    if not positive_only:
+        sections.append(("Movies the user DIDN'T ENJOY AS MUCH:\n", neutral))
+        sections.append(("Movies the user DISLIKED:\n", disliked))
+    for header, mids in sections:
+        if not mids:
+            continue
+        prompt += header
+        for mid in mids:
+            prompt += mid_to_data[mid] + "\n"
     return prompt
 
 
