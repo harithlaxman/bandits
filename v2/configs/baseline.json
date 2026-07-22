@@ -1,0 +1,8 @@
+{
+  "num_epochs": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "num_arms": 5,
+  "difficulty": "hard",
+  "output": "./data/outputs/baselines/"
+}

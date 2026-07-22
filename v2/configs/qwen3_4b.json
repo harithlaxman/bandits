@@ -1,0 +1,17 @@
+{
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "model_name": "qwen3_4b",
+  "runner": "vllm",
+  "num_epochs": 20,
+  "num_steps": 120,
+  "seed": 42,
+  "temperature": 0.7,
+  "top_p": 0.8,
+  "top_k": 20,
+  "max_tokens": 20,
+  "num_arms": 5,
+  "difficulty": "hard",
+  "history_type": "SH",
+  "instruction_type": "detailed",
+  "output": "./data/outputs/qwen3_4b/"
+}
