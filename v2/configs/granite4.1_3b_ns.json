@@ -1,0 +1,17 @@
+{
+  "model": "ibm-granite/granite-4.1-3b",
+  "model_name": "granite4.1-3b",
+  "runner": "vllm",
+  "num_epochs": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "max_tokens": 20,
+  "num_arms": 5,
+  "difficulty": "hard",
+  "history_type": "SH",
+  "instruction_type": "detailed",
+  "switch_frac": 0.5,
+  "output": "./data/outputs/granite4.1_3b/"
+}

@@ -58,3 +58,33 @@ def build_prompt(history: List[Interaction], num_arms: int,
     block = RENDERERS[history_type](history, names)
     query = query_prompt(num_arms)
     return instruction + "\n\n" + preamble + block + query
+
+
+def build_covertype_prompt(history, current_context_text: str, num_arms: int,
+                           window: int = 30) -> str:
+    """Contextual (Covertype) prompt: instruction + per-button summary + a sliding window
+    of the last `window` raw interactions (terrain -> button, reward) + current terrain.
+    Bounded size at any horizon: summaries carry the long-run stats, the window carries
+    the recent context-reward pairs."""
+    from covertype import COVERTYPE_INSTRUCTION
+
+    names = action_names(num_arms)
+    instruction = COVERTYPE_INSTRUCTION.format(num_arms, "[" + ", ".join(names) + "]")
+
+    parts = [instruction, "", f"So far you have interacted {len(history)} times."]
+    if history:
+        parts.append("Summary per button:")
+        counts, rewards = _per_arm_stats(history, num_arms)
+        for name, n, total in zip(names, counts, rewards):
+            avg = total / (n + 1e-6)
+            parts.append(f"{name} {ACTION_UNIT}: chosen {n} times, average reward {avg:.2f}")
+        recent = history[-window:]
+        parts.append("")
+        parts.append(f"Most recent {len(recent)} interactions:")
+        for exp in recent:
+            parts.append(f"({exp.context_text}) -> {exp.action_name} {ACTION_UNIT}, "
+                         f"reward {exp.reward}")
+    parts.append("")
+    parts.append("Current terrain:")
+    parts.append(current_context_text)
+    return "\n".join(parts) + query_prompt(num_arms)

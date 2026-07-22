@@ -1,0 +1,16 @@
+{
+  "model": "google/gemma-4-E2B-it",
+  "model_name": "gemma4_e2b",
+  "runner": "vllm",
+  "env": "covertype",
+  "num_epochs": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 64,
+  "max_tokens": 20,
+  "num_arms": 7,
+  "window": 30,
+  "output": "./data/outputs/llama3.2_3b_covertype/"
+}

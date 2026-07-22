@@ -95,6 +95,17 @@ def make_means(num_arms: int, difficulty: str = "hard") -> List[float]:
     return [0.5 - gap / 2] * (num_arms - 1) + [0.5 + gap / 2]
 
 
+def swap_optimal(means: List[float]) -> List[float]:
+    """Return a copy of `means` with the best arm's mean exchanged with a suboptimal
+    arm's, so a different arm becomes optimal. The optimality gap magnitude is unchanged;
+    only the identity of the best arm moves. Used to build a single-breakpoint
+    non-stationary instance (see ``BernoulliMAB.switch_step``)."""
+    m = list(means)
+    best, worst = int(np.argmax(m)), int(np.argmin(m))
+    m[best], m[worst] = m[worst], m[best]
+    return m
+
+
 # ---------------------------------------------------------------------------
 # Records
 # ---------------------------------------------------------------------------
@@ -125,6 +136,8 @@ class BernoulliMAB:
     means: List[float]
     horizon: int
     seed: Optional[int] = None
+    switch_step: Optional[int] = None          # step at which means change (None = stationary)
+    means_after: Optional[List[float]] = None  # means from switch_step on (auto-built if None)
     history: List[Interaction] = field(default_factory=list)
     h: int = 0
 
@@ -135,9 +148,15 @@ class BernoulliMAB:
         # instance hardness = optimality gap (best - second best), for scoring/labels
         srt = sorted(self.means)
         self.instance_hardness = srt[-1] - srt[-2] if self.num_arms > 1 else srt[-1]
+        # non-stationary case: default the post-switch means to an optimal-arm swap
+        if self.switch_step is not None:
+            self.means_after = list(self.means_after) if self.means_after is not None \
+                else swap_optimal(self.means)
 
-    # --- moving-optimum seam (step currently ignored) ----------------------
+    # --- moving-optimum seam -----------------------------------------------
     def means_at(self, step: Optional[int] = None) -> List[float]:
+        if self.switch_step is not None and step is not None and step >= self.switch_step:
+            return self.means_after
         return self.means
 
     def expected_reward(self, arm: int, step: Optional[int] = None) -> float:

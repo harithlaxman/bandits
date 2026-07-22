@@ -25,5 +25,5 @@ class VLLMRunner:
     def chat(self, prompts: List[str], cfg: dict) -> List[str]:
         """Batch-generate one response per prompt. Each prompt is a single user message."""
         conversations = [[{"role": "user", "content": p}] for p in prompts]
-        outputs = self.llm.chat(conversations, self._sampling_params(cfg), use_tqdm=False)
+        outputs = self.llm.chat(conversations, self._sampling_params(cfg), use_tqdm=True)
         return [o.outputs[0].text for o in outputs]

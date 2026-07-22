@@ -4,5 +4,8 @@
   "seed": 42,
   "num_arms": 5,
   "difficulty": "hard",
+  "switch_frac": 0.5,
+  "gamma": 0.995,
+  "window": 300,
   "output": "./data/outputs/baselines/"
 }

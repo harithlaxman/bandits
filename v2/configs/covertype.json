@@ -1,0 +1,9 @@
+{
+  "num_epochs": 20,
+  "num_steps": 1000,
+  "seed": 42,
+  "num_arms": 7,
+  "linucb_alpha": 1.0,
+  "linucb_lam": 1.0,
+  "output": "./data/outputs/covertype/"
+}
